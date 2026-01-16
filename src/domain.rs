@@ -1,6 +1,12 @@
 use std::time::Instant;
 
-#[derive(PartialEq, Clone, Copy, Debug)]
+#[derive(PartialEq, Clone, Copy, Debug, Default)]
+pub struct Size {
+    pub width: u16,
+    pub height: u16,
+}
+
+#[derive(PartialEq, Clone, Copy, Debug, Default)]
 pub struct Point {
     pub x: u16,
     pub y: u16,
@@ -39,7 +45,7 @@ impl Target {
     pub fn new_random(width: u16, height: u16) -> Self {
         use rand::Rng;
         let mut rng = rand::rng();
-        
+
         let total_width = Self::DEFAULT_VISUAL_WIDTH + (Self::DEFAULT_HIT_MARGIN * 2);
 
         if width <= total_width + Self::MIN_X_PADDING || height <= Self::MIN_Y_PADDING * 2 {

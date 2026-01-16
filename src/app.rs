@@ -1,6 +1,6 @@
 use crate::db::{Leaderboard, ScoreEntry};
 use crate::domain::MAX_PLAYER_NAME_LEN;
-use crate::domain::{MouseTrace, Point, Target, format_player_name};
+use crate::domain::{MouseTrace, Point, Size, Target, format_player_name};
 use crate::validator::InteractionValidator;
 use anyhow::Result;
 use std::collections::VecDeque;
@@ -29,8 +29,8 @@ pub struct App {
     pub ranking_cache: Vec<ScoreEntry>,
     pub high_score: u32,
     pub current_score: u32,
-    pub mouse_pos: (u16, u16),
-    pub screen_size: (u16, u16),
+    pub mouse_pos: Point,
+    pub screen_size: Size,
     pub last_scene_change: Instant,
     pub should_quit: bool,
     pub mouse_history: VecDeque<MouseTrace>,
@@ -59,8 +59,11 @@ impl App {
             ranking_cache: Vec::new(),
             high_score: 0,
             current_score: 0,
-            mouse_pos: (0, 0),
-            screen_size: (0, 0),
+            mouse_pos: Point { x: 0, y: 0 },
+            screen_size: Size {
+                width: 0,
+                height: 0,
+            },
             last_scene_change: Instant::now(),
             should_quit: false,
             mouse_history: VecDeque::with_capacity(51),
@@ -90,7 +93,7 @@ impl App {
         self.last_target_spawn = Instant::now();
         self.mouse_history.clear();
         self.mouse_history
-            .push_back(MouseTrace::new(self.mouse_pos.0, self.mouse_pos.1));
+            .push_back(MouseTrace::new(self.mouse_pos.x, self.mouse_pos.y));
     }
 
     pub fn change_scene(&mut self, new_scene: Scene) {
@@ -100,7 +103,7 @@ impl App {
 
     fn start_game(&mut self) {
         self.current_score = 0;
-        let target = Target::new_random(self.screen_size.0, self.screen_size.1);
+        let target = Target::new_random(self.screen_size.width, self.screen_size.height);
         self.change_scene(Scene::Playing { target });
         self.prepare_for_next_target();
     }
@@ -142,7 +145,7 @@ impl App {
     }
 
     fn handle_mouse_move(&mut self, x: u16, y: u16) {
-        self.mouse_pos = (x, y);
+        self.mouse_pos = Point { x, y };
 
         if let Scene::Playing { .. } = self.scene {
             self.mouse_history.push_back(MouseTrace::new(x, y));
@@ -172,7 +175,7 @@ impl App {
 
                 if is_legit {
                     self.current_score += 1;
-                    *target = Target::new_random(self.screen_size.0, self.screen_size.1);
+                    *target = Target::new_random(self.screen_size.width, self.screen_size.height);
                     self.prepare_for_next_target();
                 } else {
                     self.last_cheat_warning = Some(Instant::now());

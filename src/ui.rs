@@ -53,10 +53,10 @@ fn render_warning(app: &App, f: &mut Frame, area: Rect) {
 
 fn render_cursor(app: &App, f: &mut Frame) {
     let area = f.area();
-    if app.mouse_pos.0 < area.width && app.mouse_pos.1 < area.height {
+    if app.mouse_pos.x < area.width && app.mouse_pos.y < area.height {
         f.render_widget(
             Span::styled("+", Style::default().fg(Color::Cyan)),
-            Rect::new(app.mouse_pos.0, app.mouse_pos.1, 1, 1),
+            Rect::new(app.mouse_pos.x, app.mouse_pos.y, 1, 1),
         );
     }
 }

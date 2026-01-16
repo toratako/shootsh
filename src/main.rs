@@ -6,6 +6,7 @@ mod validator;
 
 use crate::app::{Action, App};
 use crate::db::Leaderboard;
+use crate::domain::Size;
 use anyhow::{Context, Result};
 use crossterm::{
     event::{self, Event, KeyCode, MouseButton, MouseEventKind},
@@ -72,7 +73,10 @@ fn run_loop<B: Backend>(app: &mut App, terminal: &mut Terminal<B>) -> Result<()>
         terminal
             .draw(|f| {
                 let area = f.area();
-                app.screen_size = (area.width, area.height);
+                app.screen_size = Size {
+                    width: area.width,
+                    height: area.height,
+                };
                 ui::render(app, f);
             })
             .map_err(|e| anyhow::anyhow!("Draw error: {}", e))?;
@@ -81,7 +85,10 @@ fn run_loop<B: Backend>(app: &mut App, terminal: &mut Terminal<B>) -> Result<()>
         if event::poll(timeout)? {
             let ev = event::read()?;
             if let Event::Resize(w, h) = ev {
-                app.screen_size = (w, h);
+                app.screen_size = Size {
+                    width: w,
+                    height: h,
+                };
             }
             handle_event(app, ev)?;
         }
