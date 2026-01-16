@@ -2,6 +2,7 @@ mod app;
 mod db;
 mod domain;
 mod ui;
+mod validator;
 
 use crate::app::{Action, App};
 use crate::db::Leaderboard;
@@ -110,14 +111,13 @@ fn handle_event(app: &mut App, event: Event) -> Result<()> {
                 }
             }
         }
-        Event::Mouse(m) => {
-            app.mouse_pos = (m.column, m.row);
-            if let MouseEventKind::Down(MouseButton::Left) = m.kind {
-                Some(Action::MouseClick(m.column, m.row))
-            } else {
-                None
+        Event::Mouse(m) => match m.kind {
+            MouseEventKind::Down(MouseButton::Left) => Some(Action::MouseClick(m.column, m.row)),
+            MouseEventKind::Moved | MouseEventKind::Drag(_) => {
+                Some(Action::MouseMove(m.column, m.row))
             }
-        }
+            _ => None,
+        },
         _ => None,
     };
 

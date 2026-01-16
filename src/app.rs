@@ -1,7 +1,7 @@
-use crate::db::Leaderboard;
-use crate::db::ScoreEntry;
+use crate::db::{Leaderboard, ScoreEntry};
 use crate::domain::MAX_PLAYER_NAME_LEN;
-use crate::domain::{Target, format_player_name};
+use crate::domain::{MouseTrace, Point, Target, format_player_name};
+use crate::validator::InteractionValidator;
 use anyhow::Result;
 use std::time::{Duration, Instant};
 
@@ -31,12 +31,17 @@ pub struct App {
     pub screen_size: (u16, u16),
     pub last_scene_change: Instant,
     pub should_quit: bool,
+    pub mouse_history: Vec<MouseTrace>,
+    pub last_target_spawn: Instant,
+    validator: InteractionValidator,
+    pub last_cheat_warning: Option<Instant>,
 }
 
 pub enum Action {
     InputChar(char),
     DeleteChar,
     SubmitName,
+    MouseMove(u16, u16),
     MouseClick(u16, u16),
     Quit,
     BackToMenu,
@@ -57,43 +62,10 @@ impl App {
             screen_size: (0, 0),
             last_scene_change: Instant::now(),
             should_quit: false,
-        }
-    }
-
-    pub fn change_scene(&mut self, new_scene: Scene) {
-        self.scene = new_scene;
-        self.last_scene_change = Instant::now();
-    }
-    fn start_game(&mut self) {
-        self.current_score = 0;
-        let target = self.generate_new_target();
-        self.change_scene(Scene::Playing { target });
-    }
-
-    fn generate_new_target(&self) -> Target {
-        Target::new_random(self.screen_size.0, self.screen_size.1)
-    }
-
-    fn end_game(&mut self) -> Result<()> {
-        let name = format_player_name(&self.player_name);
-        self.leaderboard.save(&name, self.current_score)?;
-        self.update_ranking_cache();
-
-        let is_new_record = self.current_score > self.high_score;
-        if is_new_record {
-            self.high_score = self.current_score;
-        }
-
-        self.change_scene(Scene::GameOver {
-            final_score: self.current_score,
-            is_new_record,
-        });
-        Ok(())
-    }
-
-    pub fn update_ranking_cache(&mut self) {
-        if let Ok(scores) = self.leaderboard.get_top_10() {
-            self.ranking_cache = scores;
+            mouse_history: Vec::new(),
+            last_target_spawn: Instant::now(),
+            validator: InteractionValidator::new(Default::default()),
+            last_cheat_warning: None,
         }
     }
 
@@ -101,6 +73,7 @@ impl App {
         match action {
             Action::Quit => self.should_quit = true,
             Action::Tick => self.handle_tick()?,
+            Action::MouseMove(x, y) => self.handle_mouse_move(x, y),
             Action::MouseClick(x, y) => self.handle_hit(x, y)?,
             Action::InputChar(c) => self.handle_input_char(c),
             Action::DeleteChar => self.handle_delete_char(),
@@ -110,7 +83,49 @@ impl App {
         Ok(())
     }
 
+    fn prepare_for_next_target(&mut self) {
+        self.last_target_spawn = Instant::now();
+        self.mouse_history.clear();
+        self.mouse_history
+            .push(MouseTrace::new(self.mouse_pos.0, self.mouse_pos.1));
+    }
+
+    pub fn change_scene(&mut self, new_scene: Scene) {
+        self.scene = new_scene;
+        self.last_scene_change = Instant::now();
+    }
+
+    fn start_game(&mut self) {
+        self.current_score = 0;
+        let target = Target::new_random(self.screen_size.0, self.screen_size.1);
+        self.change_scene(Scene::Playing { target });
+        self.prepare_for_next_target();
+    }
+
+    fn end_game(&mut self) -> Result<()> {
+        let name = format_player_name(&self.player_name);
+        self.leaderboard.save(&name, self.current_score)?;
+        if let Ok(scores) = self.leaderboard.get_top_10() {
+            self.ranking_cache = scores;
+        }
+        let is_new_record = self.current_score > self.high_score;
+        if is_new_record {
+            self.high_score = self.current_score;
+        }
+        self.change_scene(Scene::GameOver {
+            final_score: self.current_score,
+            is_new_record,
+        });
+        Ok(())
+    }
+
     fn handle_tick(&mut self) -> Result<()> {
+        if let Some(t) = self.last_cheat_warning {
+            if t.elapsed() >= Duration::from_secs(2) {
+                self.last_cheat_warning = None;
+            }
+        }
+
         if let Scene::Playing { .. } = self.scene {
             if self.last_scene_change.elapsed() >= Duration::from_secs(PLAYING_TIME.into()) {
                 self.end_game()?;
@@ -119,17 +134,46 @@ impl App {
         Ok(())
     }
 
+    fn handle_mouse_move(&mut self, x: u16, y: u16) {
+        self.mouse_pos = (x, y);
+
+        if let Scene::Playing { .. } = self.scene {
+            self.mouse_history.push(MouseTrace::new(x, y));
+            if self.mouse_history.len() > 50 {
+                self.mouse_history.remove(0);
+            }
+        } else {
+            if !self.mouse_history.is_empty() {
+                self.mouse_history.clear();
+            }
+        }
+    }
+
     fn handle_hit(&mut self, x: u16, y: u16) -> Result<()> {
         match &mut self.scene {
-            Scene::Menu => {
-                self.start_game();
-            }
-            Scene::Playing { target, .. } => {
-                if target.is_hit(x, y) {
+            Scene::Menu => self.start_game(),
+            Scene::Playing { target } => {
+                if !target.is_hit(x, y) {
+                    return Ok(());
+                }
+
+                let is_legit = self.validator.is_legit_interaction(
+                    &self.mouse_history,
+                    self.last_target_spawn,
+                    Point { x, y },
+                );
+
+                if is_legit {
                     self.current_score += 1;
                     *target = Target::new_random(self.screen_size.0, self.screen_size.1);
+                    self.prepare_for_next_target();
+                } else {
+                    self.last_cheat_warning = Some(Instant::now());
+                    self.mouse_history.clear();
+                    self.current_score = 0;
                 }
             }
+
             Scene::GameOver { .. } => {
                 if self.last_scene_change.elapsed() >= Duration::from_millis(500) {
                     self.change_scene(Scene::Menu);

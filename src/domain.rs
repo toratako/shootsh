@@ -1,8 +1,27 @@
-#[derive(PartialEq, Clone, Copy)]
+use std::time::Instant;
+
+#[derive(PartialEq, Clone, Copy, Debug)]
 pub struct Point {
     pub x: u16,
     pub y: u16,
 }
+
+#[derive(Clone, Copy, Debug)]
+pub struct MouseTrace {
+    pub pos: Point,
+    pub time: Instant,
+}
+
+impl MouseTrace {
+    pub fn new(x: u16, y: u16) -> Self {
+        Self {
+            pos: Point { x, y },
+            time: Instant::now(),
+        }
+    }
+}
+
+pub const MAX_PLAYER_NAME_LEN: usize = 15;
 
 #[derive(PartialEq, Clone)]
 pub struct Target {
@@ -10,8 +29,6 @@ pub struct Target {
     pub visual_width: u16,
     pub hit_margin: u16,
 }
-
-pub const MAX_PLAYER_NAME_LEN: usize = 15;
 
 impl Target {
     const DEFAULT_VISUAL_WIDTH: u16 = 2;
@@ -22,7 +39,7 @@ impl Target {
     pub fn new_random(width: u16, height: u16) -> Self {
         use rand::Rng;
         let mut rng = rand::rng();
-
+        
         let total_width = Self::DEFAULT_VISUAL_WIDTH + (Self::DEFAULT_HIT_MARGIN * 2);
 
         if width <= total_width + Self::MIN_X_PADDING || height <= Self::MIN_Y_PADDING * 2 {

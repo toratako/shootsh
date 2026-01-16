@@ -25,7 +25,30 @@ pub fn render(app: &App, f: &mut Frame) {
             is_new_record,
         } => render_game_over(app, *final_score, *is_new_record, f, area),
     }
+    render_warning(app, f, area);
     render_cursor(app, f);
+}
+
+fn render_warning(app: &App, f: &mut Frame, area: Rect) {
+    if let Some(_) = app.last_cheat_warning {
+        let warning_area = centered_rect(45, 5, area);
+
+        f.render_widget(Clear, warning_area);
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Red).bold())
+            .bg(Color::Black);
+
+        let text = Paragraph::new(vec![
+            Line::from("!! ABNORMAL BEHAVIOR DETECTED !!").red().bold(),
+            Line::from("The interaction was discarded.").dark_gray(),
+        ])
+        .alignment(Alignment::Center)
+        .block(block);
+
+        f.render_widget(text, warning_area);
+    }
 }
 
 fn render_cursor(app: &App, f: &mut Frame) {
