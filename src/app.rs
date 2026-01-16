@@ -180,7 +180,6 @@ impl App {
                 } else {
                     self.last_cheat_warning = Some(Instant::now());
                     self.mouse_history.clear();
-                    self.current_score = 0;
                 }
             }
 
