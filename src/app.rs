@@ -3,6 +3,7 @@ use crate::domain::MAX_PLAYER_NAME_LEN;
 use crate::domain::{MouseTrace, Point, Target, format_player_name};
 use crate::validator::InteractionValidator;
 use anyhow::Result;
+use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 pub const PLAYING_TIME: u16 = 15;
@@ -32,7 +33,7 @@ pub struct App {
     pub screen_size: (u16, u16),
     pub last_scene_change: Instant,
     pub should_quit: bool,
-    pub mouse_history: Vec<MouseTrace>,
+    pub mouse_history: VecDeque<MouseTrace>,
     pub last_target_spawn: Instant,
     validator: InteractionValidator,
     pub last_cheat_warning: Option<Instant>,
@@ -62,7 +63,7 @@ impl App {
             screen_size: (0, 0),
             last_scene_change: Instant::now(),
             should_quit: false,
-            mouse_history: Vec::new(),
+            mouse_history: VecDeque::with_capacity(51),
             last_target_spawn: Instant::now(),
             validator: InteractionValidator::new(Default::default()),
             last_cheat_warning: None,
@@ -89,7 +90,7 @@ impl App {
         self.last_target_spawn = Instant::now();
         self.mouse_history.clear();
         self.mouse_history
-            .push(MouseTrace::new(self.mouse_pos.0, self.mouse_pos.1));
+            .push_back(MouseTrace::new(self.mouse_pos.0, self.mouse_pos.1));
     }
 
     pub fn change_scene(&mut self, new_scene: Scene) {
@@ -144,9 +145,9 @@ impl App {
         self.mouse_pos = (x, y);
 
         if let Scene::Playing { .. } = self.scene {
-            self.mouse_history.push(MouseTrace::new(x, y));
+            self.mouse_history.push_back(MouseTrace::new(x, y));
             if self.mouse_history.len() > 50 {
-                self.mouse_history.remove(0);
+                self.mouse_history.pop_front();
             }
         } else {
             if !self.mouse_history.is_empty() {
@@ -164,7 +165,7 @@ impl App {
                 }
 
                 let is_legit = self.validator.is_legit_interaction(
-                    &self.mouse_history,
+                    &self.mouse_history.make_contiguous(),
                     self.last_target_spawn,
                     Point { x, y },
                 );
