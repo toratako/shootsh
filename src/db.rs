@@ -36,16 +36,16 @@ impl Leaderboard {
         )?;
         Ok(())
     }
-    pub fn get_top_10(&self) -> Result<Vec<ScoreEntry>> {
+    pub fn get_top_scores(&self, limit: u32) -> Result<Vec<ScoreEntry>> {
         let mut stmt = self.conn.prepare_cached(
-            "SELECT name, score, strftime('%m-%d %H:%M', created_at, 'localtime') 
-             FROM leaderboard 
-             ORDER BY score DESC 
-             LIMIT 10",
+            "SELECT name, score, strftime('%m-%d %H:%M', created_at, 'localtime')
+             FROM leaderboard
+             ORDER BY score DESC
+             LIMIT ?1",
         )?;
 
         let entries = stmt
-            .query_map([], |row| {
+            .query_map(params![limit], |row| {
                 Ok(ScoreEntry {
                     name: row.get(0)?,
                     score: row.get(1)?,

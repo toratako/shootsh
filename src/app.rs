@@ -6,6 +6,7 @@ use anyhow::Result;
 use std::time::{Duration, Instant};
 
 pub const PLAYING_TIME: u16 = 15;
+pub const RANKING_LIMIT: u32 = 10;
 
 #[derive(PartialEq, Clone)]
 pub enum Scene {
@@ -50,12 +51,11 @@ pub enum Action {
 
 impl App {
     pub fn new(leaderboard: Leaderboard) -> Self {
-        let ranking_cache = leaderboard.get_top_10().unwrap_or_default();
-        Self {
+        let mut app = Self {
             scene: Scene::Naming,
             player_name: String::new(),
             leaderboard,
-            ranking_cache,
+            ranking_cache: Vec::new(),
             high_score: 0,
             current_score: 0,
             mouse_pos: (0, 0),
@@ -66,7 +66,9 @@ impl App {
             last_target_spawn: Instant::now(),
             validator: InteractionValidator::new(Default::default()),
             last_cheat_warning: None,
-        }
+        };
+        app.update_ranking_cache();
+        app
     }
 
     pub fn update_state(&mut self, action: Action) -> Result<()> {
@@ -105,9 +107,7 @@ impl App {
     fn end_game(&mut self) -> Result<()> {
         let name = format_player_name(&self.player_name);
         self.leaderboard.save(&name, self.current_score)?;
-        if let Ok(scores) = self.leaderboard.get_top_10() {
-            self.ranking_cache = scores;
-        }
+        self.update_ranking_cache();
         let is_new_record = self.current_score > self.high_score;
         if is_new_record {
             self.high_score = self.current_score;
@@ -117,6 +117,12 @@ impl App {
             is_new_record,
         });
         Ok(())
+    }
+
+    pub fn update_ranking_cache(&mut self) {
+        if let Ok(scores) = self.leaderboard.get_top_scores(RANKING_LIMIT) {
+            self.ranking_cache = scores;
+        }
     }
 
     fn handle_tick(&mut self) -> Result<()> {
