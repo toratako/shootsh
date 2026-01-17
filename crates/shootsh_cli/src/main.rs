@@ -1,12 +1,3 @@
-mod app;
-mod db;
-mod domain;
-mod ui;
-mod validator;
-
-use crate::app::{Action, App};
-use crate::db::Leaderboard;
-use crate::domain::Size;
 use anyhow::{Context, Result};
 use crossterm::{
     event::{self, Event, KeyCode, MouseButton, MouseEventKind},
@@ -15,6 +6,7 @@ use crossterm::{
 };
 use ratatui::prelude::*;
 use rusqlite::Connection;
+use shootsh_core::{Action, App, Leaderboard, domain, ui};
 use std::{
     io,
     time::{Duration, Instant},
@@ -59,7 +51,7 @@ fn main() -> Result<()> {
         println!("SESSION BEST: {}", app.high_score);
     }
 
-    let final_name = crate::domain::format_player_name(&app.player_name);
+    let final_name = domain::format_player_name(&app.player_name);
     println!("Good bye {}! See you next time at shoot.sh :)", final_name);
 
     Ok(())
@@ -73,7 +65,7 @@ fn run_loop<B: Backend>(app: &mut App, terminal: &mut Terminal<B>) -> Result<()>
         terminal
             .draw(|f| {
                 let area = f.area();
-                app.screen_size = Size {
+                app.screen_size = domain::Size {
                     width: area.width,
                     height: area.height,
                 };
@@ -85,7 +77,7 @@ fn run_loop<B: Backend>(app: &mut App, terminal: &mut Terminal<B>) -> Result<()>
         if event::poll(timeout)? {
             let ev = event::read()?;
             if let Event::Resize(w, h) = ev {
-                app.screen_size = Size {
+                app.screen_size = domain::Size {
                     width: w,
                     height: h,
                 };
