@@ -86,6 +86,7 @@ impl russh::server::Server for MyServer {
             })),
             update_tx,
             update_rx: Arc::new(Mutex::new(Some(update_rx))),
+            last_mouse_buttons: MouseButtons::NONE,
         }
     }
 }
@@ -98,6 +99,7 @@ pub struct ClientHandler {
     terminal_size: Arc<Mutex<domain::Size>>,
     update_tx: mpsc::UnboundedSender<()>,
     update_rx: Arc<Mutex<Option<mpsc::UnboundedReceiver<()>>>>,
+    last_mouse_buttons: MouseButtons,
 }
 
 impl ClientHandler {
@@ -292,12 +294,15 @@ impl Handler for ClientHandler {
                         let x = m.x.saturating_sub(1);
                         let y = m.y.saturating_sub(1);
 
-                        // follow all mouse movement
-                        if m.mouse_buttons.contains(MouseButtons::LEFT) {
+                        let was_pressed = self.last_mouse_buttons.contains(MouseButtons::LEFT);
+                        let is_pressed = m.mouse_buttons.contains(MouseButtons::LEFT);
+
+                        if is_pressed && !was_pressed {
                             actions.push(Action::MouseClick(x, y));
-                        } else {
-                            actions.push(Action::MouseMove(x, y));
                         }
+
+                        actions.push(Action::MouseMove(x, y));
+                        self.last_mouse_buttons = m.mouse_buttons;
                     }
                     _ => {}
                 }
