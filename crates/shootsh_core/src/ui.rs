@@ -53,11 +53,29 @@ fn render_warning(app: &App, f: &mut Frame, area: Rect) {
 
 fn render_cursor(app: &App, f: &mut Frame) {
     let area = f.area();
-    if app.mouse_pos.x < area.width && app.mouse_pos.y < area.height {
-        f.render_widget(
-            Span::styled("+", Style::default().fg(Color::Cyan)),
-            Rect::new(app.mouse_pos.x, app.mouse_pos.y, 1, 1),
-        );
+
+    let cursor_lines = vec!["  v  ", "- + -", "  ^  "];
+
+    let cursor_height = cursor_lines.len() as u16;
+    let cursor_width = cursor_lines.iter().map(|s| s.len()).max().unwrap_or(0) as u16;
+
+    let offset_x = cursor_width / 2;
+    let offset_y = cursor_height / 2;
+
+    for (i, line) in cursor_lines.iter().enumerate() {
+        for (j, ch) in line.chars().enumerate() {
+            let x = app.mouse_pos.x as i32 + j as i32 - offset_x as i32;
+            let y = app.mouse_pos.y as i32 + i as i32 - offset_y as i32;
+
+            if x >= 0 && x < area.width as i32 && y >= 0 && y < area.height as i32 {
+                if ch != ' ' {
+                    f.render_widget(
+                        Span::styled(ch.to_string(), Style::default().fg(Color::LightGreen)),
+                        Rect::new(x as u16, y as u16, 1, 1),
+                    );
+                }
+            }
+        }
     }
 }
 
