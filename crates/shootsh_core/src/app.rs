@@ -1,10 +1,12 @@
-use crate::db::{Leaderboard, ScoreEntry};
+use crate::db::{DbRequest, ScoreEntry};
 use crate::domain::MAX_PLAYER_NAME_LEN;
 use crate::domain::{MouseTrace, Point, Size, Target, format_player_name};
 use crate::validator::InteractionValidator;
 use anyhow::Result;
 use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use tokio::sync::mpsc;
 
 pub const PLAYING_TIME: u16 = 15;
 pub const RANKING_LIMIT: u32 = 10;
@@ -25,8 +27,8 @@ pub enum Scene {
 pub struct App {
     pub scene: Scene,
     pub player_name: String,
-    pub leaderboard: Leaderboard,
-    pub ranking_cache: Vec<ScoreEntry>,
+    pub ranking_cache: Arc<Mutex<Vec<ScoreEntry>>>,
+    pub db_tx: mpsc::Sender<DbRequest>,
     pub high_score: u32,
     pub current_score: u32,
     pub mouse_pos: Point,
@@ -51,12 +53,11 @@ pub enum Action {
 }
 
 impl App {
-    pub fn new(leaderboard: Leaderboard) -> Self {
-        let mut app = Self {
+    pub fn new(db_tx: mpsc::Sender<DbRequest>, ranking_cache: Arc<Mutex<Vec<ScoreEntry>>>) -> Self {
+        Self {
             scene: Scene::Naming,
             player_name: String::new(),
-            leaderboard,
-            ranking_cache: Vec::new(),
+            ranking_cache,
             high_score: 0,
             current_score: 0,
             mouse_pos: Point { x: 0, y: 0 },
@@ -70,9 +71,8 @@ impl App {
             last_target_spawn: Instant::now(),
             validator: InteractionValidator::new(Default::default()),
             last_cheat_warning: None,
-        };
-        app.update_ranking_cache();
-        app
+            db_tx,
+        }
     }
 
     pub fn update_state(&mut self, action: Action) -> Result<()> {
@@ -110,23 +110,23 @@ impl App {
 
     fn end_game(&mut self) -> Result<()> {
         let name = format_player_name(&self.player_name);
-        self.leaderboard.save(&name, self.current_score)?;
-        self.update_ranking_cache();
+
+        let _ = self.db_tx.try_send(DbRequest::SaveScore {
+            name: name.clone(),
+            score: self.current_score,
+        });
+
         let is_new_record = self.current_score > self.high_score;
         if is_new_record {
             self.high_score = self.current_score;
         }
+
         self.change_scene(Scene::GameOver {
             final_score: self.current_score,
             is_new_record,
         });
-        Ok(())
-    }
 
-    pub fn update_ranking_cache(&mut self) {
-        if let Ok(scores) = self.leaderboard.get_top_scores(RANKING_LIMIT) {
-            self.ranking_cache = scores;
-        }
+        Ok(())
     }
 
     fn handle_tick(&mut self) -> Result<()> {

@@ -6,16 +6,43 @@ use crossterm::{
 };
 use ratatui::prelude::*;
 use rusqlite::Connection;
-use shootsh_core::{Action, App, Leaderboard, domain, ui};
+use shootsh_core::{
+    Action, App,
+    db::{DbRequest, Repository},
+    domain, ui,
+};
 use std::{
     io,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
+use tokio::sync::mpsc;
 
 fn main() -> Result<()> {
     let conn = Connection::open("scores.db").context("Failed to open database")?;
-    let leaderboard = Leaderboard::new(conn).context("Failed to initialize leaderboard")?;
-    let mut app = App::new(leaderboard);
+    let repo = Repository::new(conn).context("Failed to initialize repository")?;
+
+    let (db_tx, mut db_rx) = mpsc::channel::<DbRequest>(100);
+    let shared_cache = Arc::new(Mutex::new(repo.get_top_scores(10).unwrap_or_default()));
+
+    let worker_cache = Arc::clone(&shared_cache);
+    std::thread::spawn(move || {
+        while let Some(req) = db_rx.blocking_recv() {
+            match req {
+                DbRequest::SaveScore { name, score } => {
+                    if let Ok(_) = repo.save_score(&name, score) {
+                        if let Ok(new_ranks) = repo.get_top_scores(10) {
+                            if let Ok(mut lock) = worker_cache.lock() {
+                                *lock = new_ranks;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    let mut app = App::new(db_tx, Arc::clone(&shared_cache));
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -57,21 +84,22 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn run_loop<B: Backend>(app: &mut App, terminal: &mut Terminal<B>) -> Result<()> {
+fn run_loop<B: Backend>(app: &mut App, terminal: &mut Terminal<B>) -> Result<()>
+where
+    <B as Backend>::Error: std::error::Error + Send + Sync + 'static,
+{
     let tick_rate = Duration::from_millis(16);
     let mut last_tick = Instant::now();
 
     while !app.should_quit {
-        terminal
-            .draw(|f| {
-                let area = f.area();
-                app.screen_size = domain::Size {
-                    width: area.width,
-                    height: area.height,
-                };
-                ui::render(app, f);
-            })
-            .map_err(|e| anyhow::anyhow!("Draw error: {}", e))?;
+        terminal.draw(|f| {
+            let area = f.area();
+            app.screen_size = domain::Size {
+                width: area.width,
+                height: area.height,
+            };
+            ui::render(app, f);
+        })?;
 
         let timeout = tick_rate.saturating_sub(last_tick.elapsed());
         if event::poll(timeout)? {

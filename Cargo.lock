@@ -2582,6 +2582,7 @@ dependencies = [
  "ratatui",
  "rusqlite",
  "shootsh_core",
+ "tokio",
 ]
 
 [[package]]
@@ -2594,6 +2595,7 @@ dependencies = [
  "rand 0.9.2",
  "ratatui",
  "rusqlite",
+ "tokio",
 ]
 
 [[package]]

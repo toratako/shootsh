@@ -1,4 +1,5 @@
-use rusqlite::{Connection, Result, params};
+use anyhow::Result;
+use rusqlite::{Connection, params};
 
 pub struct ScoreEntry {
     pub name: String,
@@ -6,10 +7,15 @@ pub struct ScoreEntry {
     pub created_at: String,
 }
 
-pub struct Leaderboard {
+pub struct Repository {
     conn: Connection,
 }
-impl Leaderboard {
+
+pub enum DbRequest {
+    SaveScore { name: String, score: u32 },
+}
+
+impl Repository {
     pub fn new(conn: Connection) -> Result<Self> {
         conn.execute(
             "CREATE TABLE IF NOT EXISTS leaderboard (
@@ -21,21 +27,43 @@ impl Leaderboard {
             [],
         )?;
 
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_leaderboard_score ON leaderboard (score DESC)",
-            [],
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fingerprint TEXT UNIQUE NOT NULL,
+                username TEXT UNIQUE NOT NULL,
+                created_at DATETIME DEFAULT (DATETIME('now', 'localtime'))
+            );
+            CREATE TABLE IF NOT EXISTS user_stats (
+                user_id INTEGER PRIMARY KEY,
+                high_score INTEGER DEFAULT 0,
+                total_hits INTEGER DEFAULT 0,
+                total_misses INTEGER DEFAULT 0,
+                sessions INTEGER DEFAULT 0,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS daily_activity (
+                user_id INTEGER,
+                date DATE DEFAULT (DATE('now', 'localtime')),
+                count INTEGER DEFAULT 0,
+                PRIMARY KEY (user_id, date),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_users_fingerprint ON users(fingerprint);
+            CREATE INDEX IF NOT EXISTS idx_leaderboard_score ON leaderboard (score DESC);",
         )?;
 
         Ok(Self { conn })
     }
 
-    pub fn save(&self, name: &str, score: u32) -> Result<()> {
+    pub fn save_score(&self, name: &str, score: u32) -> Result<()> {
         self.conn.execute(
             "INSERT INTO leaderboard (name, score) VALUES (?1, ?2)",
             params![name, score],
         )?;
         Ok(())
     }
+
     pub fn get_top_scores(&self, limit: u32) -> Result<Vec<ScoreEntry>> {
         let mut stmt = self.conn.prepare_cached(
             "SELECT name, score, strftime('%m-%d %H:%M', created_at, 'localtime')
@@ -52,7 +80,7 @@ impl Leaderboard {
                     created_at: row.get(2)?,
                 })
             })?
-            .collect::<Result<Vec<_>>>()?;
+            .collect::<std::result::Result<Vec<_>, rusqlite::Error>>()?;
 
         Ok(entries)
     }
