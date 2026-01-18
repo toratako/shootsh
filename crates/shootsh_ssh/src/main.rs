@@ -7,6 +7,7 @@ use rusqlite::Connection;
 use russh::keys::ssh_key::rand_core::OsRng;
 use russh::server::Server as _;
 use shootsh_core::db::{DbCache, DbRequest, Repository};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::net::TcpListener;
@@ -22,6 +23,17 @@ async fn main() -> Result<()> {
     let (db_tx, db_rx) = mpsc::channel::<DbRequest>(100);
     spawn_db_worker(repo, Arc::clone(&shared_cache), db_rx);
 
+    let connection_count = Arc::new(AtomicUsize::new(0));
+    let count_for_log = Arc::clone(&connection_count);
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(5));
+        loop {
+            interval.tick().await;
+            let count = count_for_log.load(Ordering::Relaxed);
+            println!("Current active connections: {}", count);
+        }
+    });
+
     let config = Arc::new(russh::server::Config {
         inactivity_timeout: Some(Duration::from_secs(3600)),
         auth_rejection_time: Duration::from_secs(3),
@@ -35,6 +47,7 @@ async fn main() -> Result<()> {
     let mut sh = MyServer {
         db_tx,
         shared_cache,
+        connection_count,
     };
 
     let addr = "0.0.0.0:2222";

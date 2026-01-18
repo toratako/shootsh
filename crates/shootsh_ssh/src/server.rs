@@ -5,6 +5,7 @@ use russh::*;
 use shootsh_core::db::{DbCache, DbRequest};
 use shootsh_core::{Action, App, domain, ui};
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -15,11 +16,14 @@ const CLEANUP_SEQ: &[u8] = b"\x1b[?1003l\x1b[?1006l\x1b[?1049l\x1b[?25h";
 pub struct MyServer {
     pub db_tx: mpsc::Sender<DbRequest>,
     pub shared_cache: Arc<Mutex<DbCache>>,
+    pub connection_count: Arc<AtomicUsize>,
 }
 
 impl russh::server::Server for MyServer {
     type Handler = ClientHandler;
-    fn new_client(&mut self, _peer_addr: Option<SocketAddr>) -> Self::Handler {
+    fn new_client(&mut self, peer_addr: Option<SocketAddr>) -> Self::Handler {
+        let count = self.connection_count.fetch_add(1, Ordering::Relaxed) + 1;
+        println!("New connection from {:?}. Active: {}", peer_addr, count);
         let (update_tx, update_rx) = mpsc::unbounded_channel();
         ClientHandler {
             db_tx: self.db_tx.clone(),
@@ -32,6 +36,7 @@ impl russh::server::Server for MyServer {
             })),
             update_tx,
             update_rx: Arc::new(Mutex::new(Some(update_rx))),
+            connection_count: self.connection_count.clone(),
         }
     }
 }
@@ -44,6 +49,7 @@ pub struct ClientHandler {
     terminal_size: Arc<Mutex<domain::Size>>,
     update_tx: mpsc::UnboundedSender<()>,
     update_rx: Arc<Mutex<Option<mpsc::UnboundedReceiver<()>>>>,
+    connection_count: Arc<AtomicUsize>,
 }
 
 impl ClientHandler {
@@ -224,5 +230,12 @@ impl Handler for ClientHandler {
         }
 
         Ok(())
+    }
+}
+
+impl Drop for ClientHandler {
+    fn drop(&mut self) {
+        let count = self.connection_count.fetch_sub(1, Ordering::Relaxed) - 1;
+        println!("Connection closed. Active: {}", count);
     }
 }
