@@ -1,4 +1,5 @@
 use crate::app::{App, PLAYING_TIME, Scene};
+use crate::db::DbCache;
 use ratatui::{prelude::*, widgets::*};
 use std::time::Duration;
 
@@ -8,7 +9,7 @@ pub const MIN_HEIGHT: u16 = 24;
 const TABLE_WIDTH: u16 = 50;
 const NAMING_INPUT_WIDTH: u16 = 40;
 
-pub fn render(app: &App, f: &mut Frame) {
+pub fn render(app: &App, cache: &DbCache, f: &mut Frame) {
     let area = f.area();
 
     if area.width < MIN_WIDTH || area.height < MIN_HEIGHT {
@@ -18,12 +19,12 @@ pub fn render(app: &App, f: &mut Frame) {
 
     match &app.scene {
         Scene::Naming => render_naming(app, f, area),
-        Scene::Menu => render_menu(app, f, area),
+        Scene::Menu => render_menu(app, cache, f, area),
         Scene::Playing { target } => render_playing(app, target, f, area),
         Scene::GameOver {
             final_score,
             is_new_record,
-        } => render_game_over(app, *final_score, *is_new_record, f, area),
+        } => render_game_over(app, cache, *final_score, *is_new_record, f, area),
     }
     render_warning(app, f, area);
     render_cursor(app, f);
@@ -134,7 +135,7 @@ fn render_naming(app: &App, f: &mut Frame, area: Rect) {
     );
 }
 
-fn render_menu(app: &App, f: &mut Frame, area: Rect) {
+fn render_menu(app: &App, cache: &DbCache, f: &mut Frame, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .margin(2)
@@ -161,7 +162,7 @@ fn render_menu(app: &App, f: &mut Frame, area: Rect) {
         Paragraph::new(lines).alignment(Alignment::Center),
         chunks[1],
     );
-    render_leaderboard(app, f, chunks[2], false);
+    render_leaderboard(app, cache, f, chunks[2], false);
 }
 
 fn render_playing(app: &App, target: &crate::domain::Target, f: &mut Frame, area: Rect) {
@@ -184,7 +185,14 @@ fn render_playing(app: &App, target: &crate::domain::Target, f: &mut Frame, area
         f.render_widget(Block::default().bg(Color::Red), visible_rect);
     }
 }
-fn render_game_over(app: &App, score: u32, is_new_record: bool, f: &mut Frame, area: Rect) {
+fn render_game_over(
+    app: &App,
+    cache: &DbCache,
+    score: u32,
+    is_new_record: bool,
+    f: &mut Frame,
+    area: Rect,
+) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .margin(4)
@@ -202,14 +210,10 @@ fn render_game_over(app: &App, score: u32, is_new_record: bool, f: &mut Frame, a
         Line::from("Click to return Menu").italic(),
     ];
     f.render_widget(Paragraph::new(msg).alignment(Alignment::Center), chunks[0]);
-    render_leaderboard(app, f, chunks[1], true);
+    render_leaderboard(app, cache, f, chunks[1], true);
 }
 
-fn render_leaderboard(app: &App, f: &mut Frame, area: Rect, is_game_over: bool) {
-    let cache = match app.db_cache.try_lock() {
-        Ok(guard) => guard,
-        Err(_) => return,
-    };
+fn render_leaderboard(app: &App, cache: &DbCache, f: &mut Frame, area: Rect, is_game_over: bool) {
     let rows: Vec<Row> = cache
         .top_scores
         .iter()

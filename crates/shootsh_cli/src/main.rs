@@ -86,14 +86,19 @@ where
     let mut last_tick = Instant::now();
 
     while !app.should_quit {
-        terminal.draw(|f| {
-            let area = f.area();
+        if let Ok(size) = terminal.size() {
             app.screen_size = domain::Size {
-                width: area.width,
-                height: area.height,
+                width: size.width,
+                height: size.height,
             };
-            ui::render(app, f);
-        })?;
+        }
+
+        {
+            let cache = app.db_cache.lock().unwrap();
+            terminal.draw(|f| {
+                ui::render(app, &cache, f);
+            })?;
+        }
 
         let timeout = tick_rate.saturating_sub(last_tick.elapsed());
         if event::poll(timeout)? {
