@@ -9,8 +9,20 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::mpsc;
-
 const CLEANUP_SEQ: &[u8] = b"\x1b[?1003l\x1b[?1006l\x1b[?1049l\x1b[?25h";
+
+/// A thread-safe wrapper around a byte buffer to capture TUI draw calls.
+#[derive(Clone, Default)]
+struct SharedBuffer(Arc<Mutex<Vec<u8>>>);
+
+impl std::io::Write for SharedBuffer {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().write(buf)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0.lock().unwrap().flush()
+    }
+}
 
 #[derive(Clone)]
 pub struct MyServer {
@@ -37,6 +49,8 @@ impl russh::server::Server for MyServer {
             update_tx,
             update_rx: Arc::new(Mutex::new(Some(update_rx))),
             connection_count: self.connection_count.clone(),
+            terminal: Arc::new(Mutex::new(None)),
+            output_buffer: SharedBuffer::default(),
         }
     }
 }
@@ -50,41 +64,66 @@ pub struct ClientHandler {
     update_tx: mpsc::UnboundedSender<()>,
     update_rx: Arc<Mutex<Option<mpsc::UnboundedReceiver<()>>>>,
     connection_count: Arc<AtomicUsize>,
+    terminal: Arc<Mutex<Option<Terminal<CrosstermBackend<SharedBuffer>>>>>,
+    output_buffer: SharedBuffer,
 }
 
+use std::io::Cursor;
 impl ClientHandler {
-    fn render_frame(app: &mut App, size: domain::Size) -> Vec<u8> {
+    fn render_frame(
+        app: &mut App,
+        size: domain::Size,
+        terminal_lock: &Arc<Mutex<Option<Terminal<CrosstermBackend<SharedBuffer>>>>>,
+        shared_output: &SharedBuffer,
+    ) -> Vec<u8> {
         let cache_snapshot = {
             let lock = app.db_cache.lock().unwrap();
             lock.clone()
         };
 
-        let mut buffer = Vec::new();
         app.screen_size = size;
-        {
-            let backend = CrosstermBackend::new(&mut buffer);
-            let area = Rect::new(0, 0, size.width, size.height);
-            let mut terminal = Terminal::with_options(
-                backend,
-                TerminalOptions {
-                    viewport: Viewport::Fixed(area),
-                },
-            )
-            .expect("Failed to create terminal");
 
-            terminal.clear().expect("Failed to clear terminal");
-            terminal
-                .draw(|f| {
-                    ui::render(app, &cache_snapshot, f);
-                    f.set_cursor_position(ratatui::layout::Position::new(0, 0));
-                })
-                .expect("Failed to draw frame");
+        let mut terminal_guard = terminal_lock.lock().unwrap();
+        if terminal_guard.is_none() {
+            let backend = CrosstermBackend::new(shared_output.clone());
+            let area = Rect::new(0, 0, size.width, size.height);
+            *terminal_guard = Some(
+                Terminal::with_options(
+                    backend,
+                    TerminalOptions {
+                        viewport: Viewport::Fixed(area),
+                    },
+                )
+                .expect("Failed to create terminal"),
+            );
         }
-        buffer.extend_from_slice(b"\x1b[?25l");
-        buffer
+
+        let terminal = terminal_guard.as_mut().unwrap();
+
+        let current_area = Rect::new(0, 0, size.width, size.height);
+        if terminal.size().unwrap() != current_area.into() {
+            terminal
+                .resize(current_area)
+                .expect("Failed to resize terminal");
+        }
+
+        // Write Arc<Mutex<Vec<u8>>> via SharedBuffer
+        terminal
+            .draw(|f| {
+                ui::render(app, &cache_snapshot, f);
+                f.set_cursor_position(ratatui::layout::Position::new(0, 0));
+            })
+            .expect("Failed to draw frame");
+
+        let mut output = Vec::new();
+        output.extend_from_slice(b"\x1b[?25l");
+
+        let mut internal_vec = shared_output.0.lock().unwrap();
+        output.extend(std::mem::take(&mut *internal_vec));
+
+        output
     }
 }
-
 impl Handler for ClientHandler {
     type Error = russh::Error;
 
@@ -149,6 +188,8 @@ impl Handler for ClientHandler {
         let mut app = App::new(self.db_tx.clone(), self.shared_cache.clone());
         app.screen_size = initial_size;
 
+        let terminal_handle = self.terminal.clone();
+        let output_handle = self.output_buffer.clone();
         let app_arc = Arc::new(Mutex::new(app));
         self.app = Some(app_arc.clone());
 
@@ -197,7 +238,10 @@ impl Handler for ClientHandler {
                     };
                     let sz = *size_handle.lock().unwrap();
                     app.update_state(Action::Tick).ok();
-                    (Self::render_frame(&mut app, sz), app.should_quit)
+                    (
+                        Self::render_frame(&mut app, sz, &terminal_handle, &output_handle),
+                        app.should_quit,
+                    )
                 };
 
                 let (buffer, should_quit) = render_result;
@@ -209,7 +253,6 @@ impl Handler for ClientHandler {
 
         Ok(())
     }
-
     async fn data(
         &mut self,
         channel: ChannelId,
@@ -230,7 +273,7 @@ impl Handler for ClientHandler {
                 for act in actions {
                     app.update_state(act).ok();
                 }
-                Self::render_frame(&mut app, sz)
+                Self::render_frame(&mut app, sz, &self.terminal, &self.output_buffer)
             };
             let _ = session.data(channel, buffer.into());
         }
