@@ -27,7 +27,7 @@ pub enum Scene {
 pub struct App {
     pub scene: Scene,
     pub player_name: String,
-    pub db_cache: Arc<Mutex<DbCache>>,
+    pub db_cache: Arc<Mutex<Arc<DbCache>>>,
     pub db_tx: mpsc::Sender<DbRequest>,
     pub high_score: u32,
     pub current_score: u32,
@@ -53,7 +53,7 @@ pub enum Action {
 }
 
 impl App {
-    pub fn new(db_tx: mpsc::Sender<DbRequest>, db_cache: Arc<Mutex<DbCache>>) -> Self {
+    pub fn new(db_tx: mpsc::Sender<DbRequest>, db_cache: Arc<Mutex<Arc<DbCache>>>) -> Self {
         Self {
             scene: Scene::Naming,
             player_name: String::new(),

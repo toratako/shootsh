@@ -18,7 +18,7 @@ async fn main() -> Result<()> {
     let conn = Connection::open("scores.db").context("Failed to open DB")?;
     let repo = Repository::new(conn).context("Failed to init repo")?;
 
-    let shared_cache = Arc::new(Mutex::new(repo.get_current_cache()));
+    let shared_cache = Arc::new(Mutex::new(Arc::new(repo.get_current_cache())));
 
     let (db_tx, db_rx) = mpsc::channel::<DbRequest>(100);
     spawn_db_worker(repo, Arc::clone(&shared_cache), db_rx);
@@ -60,14 +60,15 @@ async fn main() -> Result<()> {
 
 fn spawn_db_worker(
     repo: Repository,
-    cache: Arc<Mutex<DbCache>>,
+    cache: Arc<Mutex<Arc<DbCache>>>,
     mut rx: mpsc::Receiver<DbRequest>,
 ) {
     std::thread::spawn(move || {
         while let Some(req) = rx.blocking_recv() {
             if let Some(new_cache) = repo.handle_request(req) {
+                let new_arc = Arc::new(new_cache);
                 if let Ok(mut lock) = cache.lock() {
-                    *lock = new_cache;
+                    *lock = new_arc;
                 }
             }
         }

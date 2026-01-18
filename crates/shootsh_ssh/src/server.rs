@@ -27,7 +27,7 @@ impl std::io::Write for SharedBuffer {
 #[derive(Clone)]
 pub struct MyServer {
     pub db_tx: mpsc::Sender<DbRequest>,
-    pub shared_cache: Arc<Mutex<DbCache>>,
+    pub shared_cache: Arc<Mutex<Arc<DbCache>>>,
     pub connection_count: Arc<AtomicUsize>,
 }
 
@@ -57,7 +57,7 @@ impl russh::server::Server for MyServer {
 
 pub struct ClientHandler {
     db_tx: mpsc::Sender<DbRequest>,
-    shared_cache: Arc<Mutex<DbCache>>,
+    shared_cache: Arc<Mutex<Arc<DbCache>>>,
     app: Option<Arc<Mutex<App>>>,
     input_transformer: InputTransformer,
     terminal_size: Arc<Mutex<domain::Size>>,
@@ -68,7 +68,6 @@ pub struct ClientHandler {
     output_buffer: SharedBuffer,
 }
 
-use std::io::Cursor;
 impl ClientHandler {
     fn render_frame(
         app: &mut App,
@@ -76,9 +75,9 @@ impl ClientHandler {
         terminal_lock: &Arc<Mutex<Option<Terminal<CrosstermBackend<SharedBuffer>>>>>,
         shared_output: &SharedBuffer,
     ) -> Vec<u8> {
-        let cache_snapshot = {
+        let cache_snapshot: Arc<DbCache> = {
             let lock = app.db_cache.lock().unwrap();
-            lock.clone()
+            Arc::clone(&*lock)
         };
 
         app.screen_size = size;

@@ -23,14 +23,15 @@ fn main() -> Result<()> {
     let repo = Repository::new(conn).context("Failed to initialize repository")?;
 
     let (db_tx, mut db_rx) = mpsc::channel::<DbRequest>(100);
-    let shared_cache = Arc::new(Mutex::new(repo.get_current_cache()));
+    let shared_cache = Arc::new(Mutex::new(Arc::new(repo.get_current_cache())));
 
     let worker_cache = Arc::clone(&shared_cache);
     std::thread::spawn(move || {
         while let Some(req) = db_rx.blocking_recv() {
             if let Some(new_cache) = repo.handle_request(req) {
+                let new_arc = Arc::new(new_cache);
                 if let Ok(mut lock) = worker_cache.lock() {
-                    *lock = new_cache;
+                    *lock = new_arc;
                 }
             }
         }
@@ -94,9 +95,13 @@ where
         }
 
         {
-            let cache = app.db_cache.lock().unwrap();
+            let cache_snapshot = {
+                let lock = app.db_cache.lock().unwrap();
+                Arc::clone(&*lock)
+            };
+
             terminal.draw(|f| {
-                ui::render(app, &cache, f);
+                ui::render(app, &cache_snapshot, f);
             })?;
         }
 
