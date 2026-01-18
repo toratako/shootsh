@@ -1,4 +1,4 @@
-use crate::db::{DbRequest, ScoreEntry};
+use crate::db::{DbCache, DbRequest};
 use crate::domain::MAX_PLAYER_NAME_LEN;
 use crate::domain::{MouseTrace, Point, Size, Target, format_player_name};
 use crate::validator::InteractionValidator;
@@ -27,7 +27,7 @@ pub enum Scene {
 pub struct App {
     pub scene: Scene,
     pub player_name: String,
-    pub ranking_cache: Arc<Mutex<Vec<ScoreEntry>>>,
+    pub db_cache: Arc<Mutex<DbCache>>,
     pub db_tx: mpsc::Sender<DbRequest>,
     pub high_score: u32,
     pub current_score: u32,
@@ -53,11 +53,11 @@ pub enum Action {
 }
 
 impl App {
-    pub fn new(db_tx: mpsc::Sender<DbRequest>, ranking_cache: Arc<Mutex<Vec<ScoreEntry>>>) -> Self {
+    pub fn new(db_tx: mpsc::Sender<DbRequest>, db_cache: Arc<Mutex<DbCache>>) -> Self {
         Self {
             scene: Scene::Naming,
             player_name: String::new(),
-            ranking_cache,
+            db_cache,
             high_score: 0,
             current_score: 0,
             mouse_pos: Point { x: 0, y: 0 },

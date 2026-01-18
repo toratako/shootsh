@@ -206,11 +206,12 @@ fn render_game_over(app: &App, score: u32, is_new_record: bool, f: &mut Frame, a
 }
 
 fn render_leaderboard(app: &App, f: &mut Frame, area: Rect, is_game_over: bool) {
-    let scores = match app.ranking_cache.try_lock() {
+    let cache = match app.db_cache.try_lock() {
         Ok(guard) => guard,
         Err(_) => return,
     };
-    let rows: Vec<Row> = scores
+    let rows: Vec<Row> = cache
+        .top_scores
         .iter()
         .enumerate()
         .map(|(i, entry)| {

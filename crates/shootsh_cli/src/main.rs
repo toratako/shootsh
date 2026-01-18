@@ -23,20 +23,14 @@ fn main() -> Result<()> {
     let repo = Repository::new(conn).context("Failed to initialize repository")?;
 
     let (db_tx, mut db_rx) = mpsc::channel::<DbRequest>(100);
-    let shared_cache = Arc::new(Mutex::new(repo.get_top_scores(10).unwrap_or_default()));
+    let shared_cache = Arc::new(Mutex::new(repo.get_current_cache()));
 
     let worker_cache = Arc::clone(&shared_cache);
     std::thread::spawn(move || {
         while let Some(req) = db_rx.blocking_recv() {
-            match req {
-                DbRequest::SaveScore { name, score } => {
-                    if let Ok(_) = repo.save_score(&name, score) {
-                        if let Ok(new_ranks) = repo.get_top_scores(10) {
-                            if let Ok(mut lock) = worker_cache.lock() {
-                                *lock = new_ranks;
-                            }
-                        }
-                    }
+            if let Some(new_cache) = repo.handle_request(req) {
+                if let Ok(mut lock) = worker_cache.lock() {
+                    *lock = new_cache;
                 }
             }
         }

@@ -2,7 +2,7 @@ use crate::input::InputTransformer;
 use ratatui::{Terminal, TerminalOptions, Viewport, backend::CrosstermBackend, layout::Rect};
 use russh::server::{Auth, Handler, Msg, Session};
 use russh::*;
-use shootsh_core::db::{DbRequest, ScoreEntry};
+use shootsh_core::db::{DbCache, DbRequest};
 use shootsh_core::{Action, App, domain, ui};
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -14,7 +14,7 @@ const CLEANUP_SEQ: &[u8] = b"\x1b[?1003l\x1b[?1006l\x1b[?1049l\x1b[?25h";
 #[derive(Clone)]
 pub struct MyServer {
     pub db_tx: mpsc::Sender<DbRequest>,
-    pub shared_cache: Arc<Mutex<Vec<ScoreEntry>>>,
+    pub shared_cache: Arc<Mutex<DbCache>>,
 }
 
 impl russh::server::Server for MyServer {
@@ -38,7 +38,7 @@ impl russh::server::Server for MyServer {
 
 pub struct ClientHandler {
     db_tx: mpsc::Sender<DbRequest>,
-    shared_cache: Arc<Mutex<Vec<ScoreEntry>>>,
+    shared_cache: Arc<Mutex<DbCache>>,
     app: Option<Arc<Mutex<App>>>,
     input_transformer: InputTransformer,
     terminal_size: Arc<Mutex<domain::Size>>,
@@ -59,15 +59,15 @@ impl ClientHandler {
                     viewport: Viewport::Fixed(area),
                 },
             )
-            .unwrap();
+            .expect("Failed to create terminal");
 
-            terminal.clear().unwrap();
+            terminal.clear().expect("Failed to clear terminal");
             terminal
                 .draw(|f| {
                     ui::render(app, f);
                     f.set_cursor_position(ratatui::layout::Position::new(0, 0));
                 })
-                .unwrap();
+                .expect("Failed to draw frame");
         }
         buffer.extend_from_slice(b"\x1b[?25l");
         buffer
