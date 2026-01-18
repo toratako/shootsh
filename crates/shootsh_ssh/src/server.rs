@@ -54,7 +54,11 @@ pub struct ClientHandler {
 
 impl ClientHandler {
     fn render_frame(app: &mut App, size: domain::Size) -> Vec<u8> {
-        let cache_lock = app.db_cache.lock().unwrap();
+        let cache_snapshot = {
+            let lock = app.db_cache.lock().unwrap();
+            lock.clone()
+        };
+
         let mut buffer = Vec::new();
         app.screen_size = size;
         {
@@ -71,7 +75,7 @@ impl ClientHandler {
             terminal.clear().expect("Failed to clear terminal");
             terminal
                 .draw(|f| {
-                    ui::render(app, &cache_lock, f);
+                    ui::render(app, &cache_snapshot, f);
                     f.set_cursor_position(ratatui::layout::Position::new(0, 0));
                 })
                 .expect("Failed to draw frame");
@@ -186,7 +190,7 @@ impl Handler for ClientHandler {
                     },
                 }
 
-                let (buffer, should_quit) = {
+                let render_result = {
                     let mut app = match app_arc.lock() {
                         Ok(a) => a,
                         Err(_) => break,
@@ -196,6 +200,7 @@ impl Handler for ClientHandler {
                     (Self::render_frame(&mut app, sz), app.should_quit)
                 };
 
+                let (buffer, should_quit) = render_result;
                 if session_handle.data(channel, buffer.into()).await.is_err() || should_quit {
                     break;
                 }
