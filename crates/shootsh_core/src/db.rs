@@ -151,7 +151,6 @@ impl Repository {
         }
     }
 
-    // called from shootsh_ssh (App doesn't has fingerprint)
     pub fn create_user(&self, fingerprint: &str, initial_name: &str) -> Result<i64> {
         self.conn.execute(
             "INSERT INTO users (fingerprint, username) VALUES (?1, ?2)",
