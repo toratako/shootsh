@@ -1,7 +1,12 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 pub const MAX_PLAYER_NAME_LEN: usize = 15;
 pub const PLAYING_TIME_SEC: u16 = 15;
+const BASE_HIT_VALUE: f64 = 100.0;
+const COMBO_MULTIPLIER_STEP: f64 = 0.1;
+const INITIAL_MULTIPLIER: f64 = 1.0;
+const DECAY_RATE: f64 = 0.95;
+const MAX_TARGET_LIFETIME_MS: u64 = 2000;
 
 #[derive(PartialEq, Clone, Copy, Debug, Default)]
 pub struct Size {
@@ -30,7 +35,49 @@ impl MouseTrace {
     }
 }
 
-#[derive(PartialEq, Clone)]
+#[derive(Debug, Clone)]
+pub struct CombatStats {
+    score: f64,
+    combo: u32,
+    hit_count: u32,
+}
+
+impl CombatStats {
+    pub fn new() -> Self {
+        Self {
+            score: 0.0,
+            combo: 0,
+            hit_count: 0,
+        }
+    }
+
+    /// FinalScore = SUM(HitValue * ComboMultiplier)
+    pub fn register_hit(&mut self) {
+        self.hit_count += 1;
+        self.combo += 1;
+
+        let current_multiplier = INITIAL_MULTIPLIER + (self.combo as f64 * COMBO_MULTIPLIER_STEP);
+        self.score += BASE_HIT_VALUE * current_multiplier;
+    }
+
+    /// Reset combo
+    pub fn register_miss(&mut self) {
+        self.combo = 0;
+    }
+
+    pub fn current_score(&self) -> u32 {
+        self.score as u32
+    }
+
+    /// T_lifetime = T_max_life * (DecayRate)^Hits
+    pub fn get_target_lifetime(&self) -> Duration {
+        let decay = DECAY_RATE.powi(self.hit_count as i32);
+        let millis = MAX_TARGET_LIFETIME_MS as f64 * decay;
+        Duration::from_millis(millis as u64)
+    }
+}
+
+#[derive(PartialEq, Clone, Debug)]
 pub struct Target {
     pub pos: Point,
     pub visual_width: u16,
@@ -40,23 +87,23 @@ pub struct Target {
 impl Target {
     const DEFAULT_VISUAL_WIDTH: u16 = 2;
     const DEFAULT_HIT_MARGIN: u16 = 1;
-    const MIN_X_PADDING: u16 = 2;
-    const MIN_Y_PADDING: u16 = 2;
+    const MIN_PADDING: u16 = 2;
 
-    pub fn new_random(width: u16, height: u16) -> Self {
+    pub fn new_random(screen: Size) -> Self {
         use rand::Rng;
         let mut rng = rand::rng();
 
         let total_width = Self::DEFAULT_VISUAL_WIDTH + (Self::DEFAULT_HIT_MARGIN * 2);
 
-        if width <= total_width + Self::MIN_X_PADDING || height <= Self::MIN_Y_PADDING * 2 {
+        if screen.width <= total_width + Self::MIN_PADDING || screen.height <= Self::MIN_PADDING * 2
+        {
             return Self::fallback();
         }
 
         Self {
             pos: Point {
-                x: rng.random_range(Self::MIN_X_PADDING..width - total_width),
-                y: rng.random_range(Self::MIN_Y_PADDING..height - Self::MIN_Y_PADDING),
+                x: rng.random_range(Self::MIN_PADDING..screen.width - total_width),
+                y: rng.random_range(Self::MIN_PADDING..screen.height - Self::MIN_PADDING),
             },
             visual_width: Self::DEFAULT_VISUAL_WIDTH,
             hit_margin: Self::DEFAULT_HIT_MARGIN,

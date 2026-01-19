@@ -20,7 +20,7 @@ pub fn render(app: &App, cache: &DbCache, f: &mut Frame) {
     match &app.scene {
         Scene::Naming => render_naming(app, f, area),
         Scene::Menu => render_menu(app, cache, f, area),
-        Scene::Playing(state) => render_playing(state, app.current_score, f, area),
+        Scene::Playing(state) => render_playing(state, f, area),
         Scene::GameOver {
             final_score,
             is_new_record,
@@ -165,13 +165,15 @@ fn render_menu(app: &App, cache: &DbCache, f: &mut Frame, area: Rect) {
     render_leaderboard(app, cache, f, chunks[2], false);
 }
 
-fn render_playing(state: &PlayingState, current_score: u32, f: &mut Frame, area: Rect) {
+fn render_playing(state: &PlayingState, f: &mut Frame, area: Rect) {
     let time_left = Duration::from_secs(crate::domain::PLAYING_TIME_SEC.into())
         .saturating_sub(state.scene_start.elapsed());
 
+    let score = state.combat_stats.current_score();
+
     let stats = Paragraph::new(format!(
         " SCORE: {} | TIME: {}s ",
-        current_score,
+        score,
         time_left.as_secs()
     ))
     .bold();

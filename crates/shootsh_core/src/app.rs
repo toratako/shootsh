@@ -1,6 +1,8 @@
 use crate::db::{DbCache, DbRequest};
-use crate::domain::{MAX_PLAYER_NAME_LEN, PLAYING_TIME_SEC};
-use crate::domain::{MouseTrace, Point, Size, Target, format_player_name};
+use crate::domain::{
+    CombatStats, MAX_PLAYER_NAME_LEN, MouseTrace, PLAYING_TIME_SEC, Point, Size, Target,
+    format_player_name,
+};
 use crate::validator::InteractionValidator;
 use anyhow::Result;
 use std::collections::VecDeque;
@@ -13,6 +15,7 @@ pub const RANKING_LIMIT: u32 = 10;
 #[derive(Clone)]
 pub struct PlayingState {
     pub target: Target,
+    pub combat_stats: CombatStats,
     pub mouse_history: VecDeque<MouseTrace>,
     pub last_target_spawn: Instant,
     pub scene_start: Instant,
@@ -32,6 +35,7 @@ pub enum Scene {
 impl PartialEq for PlayingState {
     fn eq(&self, other: &Self) -> bool {
         self.target == other.target
+            && self.combat_stats.current_score() == other.combat_stats.current_score()
     }
 }
 
@@ -41,7 +45,6 @@ pub struct App {
     pub db_cache: Arc<Mutex<Arc<DbCache>>>,
     pub db_tx: mpsc::Sender<DbRequest>,
     pub high_score: u32,
-    pub current_score: u32,
     pub mouse_pos: Point,
     pub screen_size: Size,
     pub last_scene_change: Instant,
@@ -68,12 +71,8 @@ impl App {
             player_name: String::new(),
             db_cache,
             high_score: 0,
-            current_score: 0,
             mouse_pos: Point { x: 0, y: 0 },
-            screen_size: Size {
-                width: 0,
-                height: 0,
-            },
+            screen_size: Size::default(),
             last_scene_change: Instant::now(),
             should_quit: false,
             validator: InteractionValidator::new(Default::default()),
@@ -102,9 +101,9 @@ impl App {
     }
 
     fn start_game(&mut self) {
-        self.current_score = 0;
         let state = PlayingState {
-            target: Target::new_random(self.screen_size.width, self.screen_size.height),
+            target: Target::new_random(self.screen_size),
+            combat_stats: CombatStats::new(),
             mouse_history: VecDeque::from([MouseTrace::new(self.mouse_pos.x, self.mouse_pos.y)]),
             last_target_spawn: Instant::now(),
             scene_start: Instant::now(),
@@ -112,20 +111,22 @@ impl App {
         self.change_scene(Scene::Playing(Box::new(state)));
     }
 
-    fn end_game(&mut self) -> Result<()> {
+    fn end_game(&mut self, stats: CombatStats) -> Result<()> {
+        let final_score = stats.current_score();
         let name = format_player_name(&self.player_name);
+
         let _ = self.db_tx.try_send(DbRequest::SaveScore {
             name,
-            score: self.current_score,
+            score: final_score,
         });
 
-        let is_new_record = self.current_score > self.high_score;
+        let is_new_record = final_score > self.high_score;
         if is_new_record {
-            self.high_score = self.current_score;
+            self.high_score = final_score;
         }
 
         self.change_scene(Scene::GameOver {
-            final_score: self.current_score,
+            final_score,
             is_new_record,
         });
 
@@ -133,15 +134,16 @@ impl App {
     }
 
     fn handle_tick(&mut self) -> Result<()> {
-        if let Some(t) = self.last_cheat_warning {
-            if t.elapsed() >= Duration::from_secs(2) {
-                self.last_cheat_warning = None;
-            }
+        if self
+            .last_cheat_warning
+            .map_or(false, |t| t.elapsed() >= Duration::from_secs(2))
+        {
+            self.last_cheat_warning = None;
         }
 
-        if let Scene::Playing(_) = self.scene {
-            if self.last_scene_change.elapsed() >= Duration::from_secs(PLAYING_TIME_SEC.into()) {
-                self.end_game()?;
+        if let Scene::Playing(state) = &self.scene {
+            if state.scene_start.elapsed() >= Duration::from_secs(PLAYING_TIME_SEC.into()) {
+                self.end_game(state.combat_stats.clone())?;
             }
         }
         Ok(())
@@ -163,6 +165,7 @@ impl App {
             Scene::Menu => self.start_game(),
             Scene::Playing(state) => {
                 if !state.target.is_hit(x, y) {
+                    state.combat_stats.register_miss();
                     return Ok(());
                 }
 
@@ -173,13 +176,13 @@ impl App {
                 );
 
                 if is_legit {
-                    self.current_score += 1;
-                    state.target =
-                        Target::new_random(self.screen_size.width, self.screen_size.height);
+                    state.combat_stats.register_hit();
+                    state.target = Target::new_random(self.screen_size);
                     state.last_target_spawn = Instant::now();
                     state.mouse_history.clear();
                     state.mouse_history.push_back(MouseTrace::new(x, y));
                 } else {
+                    state.combat_stats.register_miss();
                     self.last_cheat_warning = Some(Instant::now());
                     state.mouse_history.clear();
                 }
