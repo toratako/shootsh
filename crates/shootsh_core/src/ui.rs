@@ -170,10 +170,12 @@ fn render_playing(state: &PlayingState, f: &mut Frame, area: Rect) {
         .saturating_sub(state.scene_start.elapsed());
 
     let score = state.combat_stats.current_score();
+    let combo = state.combat_stats.current_combo();
 
     let stats = Paragraph::new(format!(
-        " SCORE: {} | TIME: {}s ",
+        " SCORE: {} | COMBO {} | TIME: {}s ",
         score,
+        combo,
         time_left.as_secs()
     ))
     .bold();

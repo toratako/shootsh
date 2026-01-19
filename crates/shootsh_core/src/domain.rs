@@ -69,6 +69,10 @@ impl CombatStats {
         self.score as u32
     }
 
+    pub fn current_combo(&self) -> u32 {
+        self.combo as u32
+    }
+
     /// T_lifetime = T_max_life * (DecayRate)^Hits
     pub fn get_target_lifetime(&self) -> Duration {
         let decay = DECAY_RATE.powi(self.hit_count as i32);
