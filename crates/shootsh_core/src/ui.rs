@@ -1,4 +1,4 @@
-use crate::app::{App, PLAYING_TIME, PlayingState, Scene};
+use crate::app::{App, PlayingState, Scene};
 use crate::db::DbCache;
 use ratatui::{prelude::*, widgets::*};
 use std::time::Duration;
@@ -166,8 +166,8 @@ fn render_menu(app: &App, cache: &DbCache, f: &mut Frame, area: Rect) {
 }
 
 fn render_playing(state: &PlayingState, current_score: u32, f: &mut Frame, area: Rect) {
-    let time_left =
-        Duration::from_secs(PLAYING_TIME.into()).saturating_sub(state.scene_start.elapsed());
+    let time_left = Duration::from_secs(crate::domain::PLAYING_TIME_SEC.into())
+        .saturating_sub(state.scene_start.elapsed());
 
     let stats = Paragraph::new(format!(
         " SCORE: {} | TIME: {}s ",

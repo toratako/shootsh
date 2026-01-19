@@ -1,5 +1,8 @@
 use std::time::Instant;
 
+pub const MAX_PLAYER_NAME_LEN: usize = 15;
+pub const PLAYING_TIME_SEC: u16 = 15;
+
 #[derive(PartialEq, Clone, Copy, Debug, Default)]
 pub struct Size {
     pub width: u16,
@@ -26,8 +29,6 @@ impl MouseTrace {
         }
     }
 }
-
-pub const MAX_PLAYER_NAME_LEN: usize = 15;
 
 #[derive(PartialEq, Clone)]
 pub struct Target {

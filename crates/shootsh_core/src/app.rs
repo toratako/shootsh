@@ -1,5 +1,5 @@
 use crate::db::{DbCache, DbRequest};
-use crate::domain::MAX_PLAYER_NAME_LEN;
+use crate::domain::{MAX_PLAYER_NAME_LEN, PLAYING_TIME_SEC};
 use crate::domain::{MouseTrace, Point, Size, Target, format_player_name};
 use crate::validator::InteractionValidator;
 use anyhow::Result;
@@ -8,7 +8,6 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
-pub const PLAYING_TIME: u16 = 15;
 pub const RANKING_LIMIT: u32 = 10;
 
 #[derive(Clone)]
@@ -141,7 +140,7 @@ impl App {
         }
 
         if let Scene::Playing(_) = self.scene {
-            if self.last_scene_change.elapsed() >= Duration::from_secs(PLAYING_TIME.into()) {
+            if self.last_scene_change.elapsed() >= Duration::from_secs(PLAYING_TIME_SEC.into()) {
                 self.end_game()?;
             }
         }
