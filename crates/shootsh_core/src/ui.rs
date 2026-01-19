@@ -55,6 +55,14 @@ fn render_warning(app: &App, f: &mut Frame, area: Rect) {
 fn render_cursor(app: &App, f: &mut Frame) {
     let area = f.area();
 
+    let mut cursor_color = Color::LightGreen;
+
+    if let Scene::Playing(state) = &app.scene {
+        if state.target.is_hit(app.mouse_pos.x, app.mouse_pos.y) {
+            cursor_color = Color::Yellow;
+        }
+    }
+
     let cursor_lines = vec!["  v  ", "- + -", "  ^  "];
 
     let cursor_height = cursor_lines.len() as u16;
@@ -71,7 +79,7 @@ fn render_cursor(app: &App, f: &mut Frame) {
             if x >= 0 && x < area.width as i32 && y >= 0 && y < area.height as i32 {
                 if ch != ' ' {
                     f.render_widget(
-                        Span::styled(ch.to_string(), Style::default().fg(Color::LightGreen)),
+                        Span::styled(ch.to_string(), Style::default().fg(cursor_color)),
                         Rect::new(x as u16, y as u16, 1, 1),
                     );
                 }
