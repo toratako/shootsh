@@ -15,7 +15,7 @@ use tokio::sync::mpsc;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let conn = Connection::open("scores.db").context("Failed to open DB")?;
+    let conn = Connection::open("shootsh.db").context("Failed to open DB")?;
     let repo = Repository::new(conn).context("Failed to init repo")?;
 
     let shared_cache = Arc::new(Mutex::new(Arc::new(repo.get_current_cache())));

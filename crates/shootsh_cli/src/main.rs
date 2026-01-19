@@ -19,7 +19,7 @@ use std::{
 use tokio::sync::mpsc;
 
 fn main() -> Result<()> {
-    let conn = Connection::open("scores.db").context("Failed to open database")?;
+    let conn = Connection::open("shootsh.db").context("Failed to open database")?;
     let repo = Repository::new(conn).context("Failed to initialize repository")?;
 
     let (db_tx, mut db_rx) = mpsc::channel::<DbRequest>(100);
