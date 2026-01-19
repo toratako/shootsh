@@ -4,7 +4,6 @@ use std::time::{Duration, Instant};
 pub struct AntiCheatConfig {
     pub min_reaction_time: Duration,
     pub max_pixels_per_ms: f64,
-    pub min_variance: f64,
 }
 
 impl Default for AntiCheatConfig {
@@ -12,7 +11,6 @@ impl Default for AntiCheatConfig {
         Self {
             min_reaction_time: Duration::from_millis(100),
             max_pixels_per_ms: 6.0,
-            min_variance: 0.001,
         }
     }
 }
@@ -34,26 +32,21 @@ impl InteractionValidator {
     ) -> bool {
         let last_trace = match history.last() {
             Some(t) => t,
-            None => return true,
+            None => return false,
         };
-
-        // check reaction speed
-        if last_trace.time.duration_since(spawn_time) < self.config.min_reaction_time {
-            return false;
-        }
 
         // check warp
         if last_trace.pos != click_pos {
             return false;
         }
 
-        // check speed
-        if 2 <= history.len() && !self.has_plausible_speed(history) {
+        // check reaction speed
+        if last_trace.time.duration_since(spawn_time) < self.config.min_reaction_time {
             return false;
         }
 
-        // check jitter
-        if 4 <= history.len() && !self.has_human_jitter(history) {
+        // check speed
+        if !self.has_plausible_speed(history) {
             return false;
         }
 
@@ -61,51 +54,20 @@ impl InteractionValidator {
     }
 
     fn has_plausible_speed(&self, history: &[MouseTrace]) -> bool {
+        if history.len() < 2 {
+            return true;
+        }
+        let max_px_per_ms_sq = self.config.max_pixels_per_ms.powi(2);
+
         history.windows(2).all(|w| {
-            let (p1, p2) = (w[0], w[1]);
-            let dist = self.calculate_distance(p1.pos, p2.pos);
-            let duration = p2.time.duration_since(p1.time).as_millis() as f64;
+            let dx = w[1].pos.x as f64 - w[0].pos.x as f64;
+            let dy = w[1].pos.y as f64 - w[0].pos.y as f64;
+            let dist_sq = dx.powi(2) + dy.powi(2);
 
-            duration <= 0.0 || (dist / duration) <= self.config.max_pixels_per_ms
+            let dt = w[1].time.duration_since(w[0].time).as_millis() as f64;
+
+            dt <= 0.0 || dist_sq <= max_px_per_ms_sq * dt.powi(2)
         })
-    }
-
-    fn has_human_jitter(&self, history: &[MouseTrace]) -> bool {
-        if history.len() < 4 {
-            return true;
-        }
-
-        let mut speeds = Vec::new();
-        for window in history.windows(2) {
-            let dist = self.calculate_distance(window[0].pos, window[1].pos);
-            let duration = window[1].time.duration_since(window[0].time).as_secs_f64();
-            if duration > 0.0 {
-                speeds.push(dist / duration);
-            }
-        }
-
-        if speeds.len() < 2 {
-            return true;
-        }
-
-        let accelerations: Vec<f64> = speeds.windows(2).map(|w| (w[1] - w[0]).abs()).collect();
-        let count = accelerations.len() as f64;
-        let sum: f64 = accelerations.iter().sum();
-        let mean = sum / count;
-
-        let variance: f64 = accelerations
-            .iter()
-            .map(|a| (a - mean).powi(2))
-            .sum::<f64>()
-            / count;
-
-        variance > self.config.min_variance
-    }
-
-    fn calculate_distance(&self, p1: Point, p2: Point) -> f64 {
-        let dx = (p2.x as f64 - p1.x as f64).abs();
-        let dy = (p2.y as f64 - p1.y as f64).abs();
-        (dx.powi(2) + dy.powi(2)).sqrt()
     }
 }
 
@@ -159,61 +121,5 @@ mod tests {
         let click_pos = Point { x: 10, y: 10 };
 
         assert!(!v.is_legit_interaction(&history, spawn, click_pos),);
-    }
-
-    #[test]
-    fn test_perfectly_linear_movement_should_fail() {
-        let v = InteractionValidator::new(AntiCheatConfig::default());
-        let spawn = Instant::now();
-
-        let mut history = Vec::new();
-        for i in 0..10 {
-            history.push(MouseTrace {
-                pos: Point { x: i * 10, y: 10 },
-                time: spawn + Duration::from_millis((200 + i * 10).into()),
-            });
-        }
-
-        assert!(!v.is_legit_interaction(&history, spawn, Point { x: 90, y: 10 }),);
-    }
-
-    #[test]
-    fn test_perfect_mechanical_zigzag_should_fail() {
-        let v = InteractionValidator::new(AntiCheatConfig::default());
-        let spawn = Instant::now();
-        let mut history = Vec::new();
-
-        for i in 0..10 {
-            let y = if i % 2 == 0 { 10 } else { 15 };
-            history.push(MouseTrace {
-                pos: Point { x: i * 10, y },
-                time: spawn + Duration::from_millis((200 + i * 10).into()),
-            });
-        }
-
-        let last_pos = history.last().unwrap().pos;
-
-        assert!(!v.is_legit_interaction(&history, spawn, last_pos),);
-    }
-
-    #[test]
-    fn test_human_like_zigzag_should_pass() {
-        let v = InteractionValidator::new(AntiCheatConfig::default());
-        let spawn = Instant::now();
-        let mut history = Vec::new();
-
-        let offsets = [(0, 0), (10, 2), (21, 0), (29, 3), (41, 1)];
-        let times = [200, 212, 225, 233, 250];
-
-        for (i, (x, y)) in offsets.iter().enumerate() {
-            history.push(MouseTrace {
-                pos: Point { x: *x, y: *y },
-                time: spawn + Duration::from_millis(times[i]),
-            });
-        }
-
-        let last_pos = history.last().unwrap().pos;
-
-        assert!(v.is_legit_interaction(&history, spawn, last_pos),);
     }
 }
