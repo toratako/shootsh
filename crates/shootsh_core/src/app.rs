@@ -164,6 +164,8 @@ impl App {
         match &mut self.scene {
             Scene::Menu => self.start_game(),
             Scene::Playing(state) => {
+                state.mouse_history.push_back(MouseTrace::new(x, y));
+
                 if !state.target.is_hit(x, y) {
                     state.combat_stats.register_miss();
                     return Ok(());
@@ -180,7 +182,6 @@ impl App {
                     state.target = Target::new_random(self.screen_size);
                     state.last_target_spawn = Instant::now();
                     state.mouse_history.clear();
-                    state.mouse_history.push_back(MouseTrace::new(x, y));
                 } else {
                     state.combat_stats.register_miss();
                     self.last_cheat_warning = Some(Instant::now());

@@ -34,7 +34,7 @@ impl InteractionValidator {
     ) -> bool {
         let last_trace = match history.last() {
             Some(t) => t,
-            None => return false,
+            None => return true,
         };
 
         // check reaction speed
