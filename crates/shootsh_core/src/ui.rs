@@ -186,8 +186,9 @@ fn render_playing(state: &PlayingState, f: &mut Frame, area: Rect) {
         state.target.pos.x,
         state.target.pos.y,
         state.target.visual_width,
-        1,
+        state.target.visual_height,
     );
+
     let visible_rect = target_rect.intersection(area);
 
     if !visible_rect.is_empty() {

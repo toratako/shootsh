@@ -3,8 +3,9 @@ use std::time::{Duration, Instant};
 pub const MAX_PLAYER_NAME_LEN: usize = 15;
 pub const PLAYING_TIME_SEC: u16 = 15;
 const BASE_HIT_VALUE: f64 = 100.0;
-const COMBO_MULTIPLIER_STEP: f64 = 0.1;
+const COMBO_MULTIPLIER_STEP: f64 = 0.2;
 const INITIAL_MULTIPLIER: f64 = 1.0;
+const MAX_MULTIPLIER: f64 = 3.0;
 const DECAY_RATE: f64 = 0.95;
 const MAX_TARGET_LIFETIME_MS: u64 = 2000;
 
@@ -56,8 +57,10 @@ impl CombatStats {
         self.hit_count += 1;
         self.combo += 1;
 
-        let current_multiplier = INITIAL_MULTIPLIER + (self.combo as f64 * COMBO_MULTIPLIER_STEP);
-        self.score += BASE_HIT_VALUE * current_multiplier;
+        let raw_multiplier = INITIAL_MULTIPLIER + (self.combo as f64 * COMBO_MULTIPLIER_STEP);
+        let multiplier = raw_multiplier.min(MAX_MULTIPLIER);
+
+        self.score += BASE_HIT_VALUE * multiplier;
     }
 
     /// Reset combo
@@ -85,32 +88,40 @@ impl CombatStats {
 pub struct Target {
     pub pos: Point,
     pub visual_width: u16,
-    pub hit_margin: u16,
+    pub visual_height: u16,
+    pub hit_margin_x: u16,
+    pub hit_margin_y: u16,
 }
 
 impl Target {
-    const DEFAULT_VISUAL_WIDTH: u16 = 2;
-    const DEFAULT_HIT_MARGIN: u16 = 1;
+    const DEFAULT_VISUAL_WIDTH: u16 = 4;
+    const DEFAULT_VISUAL_HEIGHT: u16 = 2;
+    const DEFAULT_HIT_MARGIN_X: u16 = 2;
+    const DEFAULT_HIT_MARGIN_Y: u16 = 1;
     const MIN_PADDING: u16 = 2;
 
     pub fn new_random(screen: Size) -> Self {
         use rand::Rng;
         let mut rng = rand::rng();
 
-        let total_width = Self::DEFAULT_VISUAL_WIDTH + (Self::DEFAULT_HIT_MARGIN * 2);
+        let total_w = Self::DEFAULT_VISUAL_WIDTH;
+        let total_h = Self::DEFAULT_VISUAL_HEIGHT;
 
-        if screen.width <= total_width + Self::MIN_PADDING || screen.height <= Self::MIN_PADDING * 2
+        if screen.width <= total_w + Self::MIN_PADDING * 2
+            || screen.height <= total_h + Self::MIN_PADDING * 2
         {
             return Self::fallback();
         }
 
         Self {
             pos: Point {
-                x: rng.random_range(Self::MIN_PADDING..screen.width - total_width),
-                y: rng.random_range(Self::MIN_PADDING..screen.height - Self::MIN_PADDING),
+                x: rng.random_range(Self::MIN_PADDING..screen.width - total_w - Self::MIN_PADDING),
+                y: rng.random_range(Self::MIN_PADDING..screen.height - total_h - Self::MIN_PADDING),
             },
             visual_width: Self::DEFAULT_VISUAL_WIDTH,
-            hit_margin: Self::DEFAULT_HIT_MARGIN,
+            visual_height: Self::DEFAULT_VISUAL_HEIGHT,
+            hit_margin_x: Self::DEFAULT_HIT_MARGIN_X,
+            hit_margin_y: Self::DEFAULT_HIT_MARGIN_Y,
         }
     }
 
@@ -118,21 +129,32 @@ impl Target {
         Self {
             pos: Point { x: 0, y: 0 },
             visual_width: Self::DEFAULT_VISUAL_WIDTH,
-            hit_margin: Self::DEFAULT_HIT_MARGIN,
+            visual_height: Self::DEFAULT_VISUAL_HEIGHT,
+            hit_margin_x: Self::DEFAULT_HIT_MARGIN_X,
+            hit_margin_y: Self::DEFAULT_HIT_MARGIN_Y,
         }
     }
 
     pub fn is_hit(&self, x: u16, y: u16) -> bool {
-        if y != self.pos.y {
+        // Y: (pos.y - margin) to (pos.y + height + margin)
+        let top_edge = self.pos.y.saturating_sub(self.hit_margin_y);
+        let bottom_edge = self
+            .pos
+            .y
+            .saturating_add(self.visual_height)
+            .saturating_add(self.hit_margin_y);
+
+        if y < top_edge || y >= bottom_edge {
             return false;
         }
 
-        let left_edge = self.pos.x.saturating_sub(self.hit_margin);
+        // X: (pos.x - margin) to (pos.x + width + margin)
+        let left_edge = self.pos.x.saturating_sub(self.hit_margin_x);
         let right_edge = self
             .pos
             .x
             .saturating_add(self.visual_width)
-            .saturating_add(self.hit_margin);
+            .saturating_add(self.hit_margin_x);
 
         x >= left_edge && x < right_edge
     }
