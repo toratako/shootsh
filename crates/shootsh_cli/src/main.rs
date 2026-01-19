@@ -22,6 +22,10 @@ fn main() -> Result<()> {
     let conn = Connection::open("shootsh.db").context("Failed to open database")?;
     let repo = Repository::new(conn).context("Failed to initialize repository")?;
 
+    let user_context = repo
+        .get_or_create_user_context("local")
+        .context("Failed to get or create local user")?;
+
     let (db_tx, mut db_rx) = mpsc::channel::<DbRequest>(100);
     let shared_cache = Arc::new(Mutex::new(Arc::new(repo.get_current_cache())));
 
@@ -37,7 +41,7 @@ fn main() -> Result<()> {
         }
     });
 
-    let mut app = App::new(db_tx, Arc::clone(&shared_cache));
+    let mut app = App::new(user_context, db_tx, Arc::clone(&shared_cache));
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -68,13 +72,6 @@ fn main() -> Result<()> {
     if let Err(e) = res {
         eprintln!("Application Error: {:?}", e);
     }
-
-    if app.high_score > 0 {
-        println!("SESSION BEST: {}", app.high_score);
-    }
-
-    let final_name = domain::format_player_name(&app.player_name);
-    println!("Good bye {}! See you next time at shoot.sh :)", final_name);
 
     Ok(())
 }

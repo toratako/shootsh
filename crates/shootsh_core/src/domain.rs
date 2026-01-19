@@ -40,7 +40,8 @@ impl MouseTrace {
 pub struct CombatStats {
     score: f64,
     combo: u32,
-    hit_count: u32,
+    pub hit_count: u32,
+    pub miss_count: u32,
 }
 
 impl CombatStats {
@@ -49,6 +50,7 @@ impl CombatStats {
             score: 0.0,
             combo: 0,
             hit_count: 0,
+            miss_count: 0,
         }
     }
 

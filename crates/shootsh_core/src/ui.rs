@@ -18,7 +18,7 @@ pub fn render(app: &App, cache: &DbCache, f: &mut Frame) {
     }
 
     match &app.scene {
-        Scene::Naming => render_naming(app, f, area),
+        Scene::Naming(input_buffer) => render_naming(app, input_buffer, f, area),
         Scene::Menu => render_menu(app, cache, f, area),
         Scene::Playing(state) => render_playing(state, f, area),
         Scene::GameOver {
@@ -101,7 +101,7 @@ fn render_size_error(f: &mut Frame, area: Rect) {
     );
 }
 
-fn render_naming(app: &App, f: &mut Frame, area: Rect) {
+fn render_naming(_app: &App, input_buffer: &str, f: &mut Frame, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -122,7 +122,7 @@ fn render_naming(app: &App, f: &mut Frame, area: Rect) {
         chunks[0],
     );
 
-    let input = Paragraph::new(app.player_name.as_str())
+    let input = Paragraph::new(input_buffer)
         .block(
             Block::default()
                 .borders(Borders::ALL)
@@ -163,8 +163,8 @@ fn render_menu(app: &App, cache: &DbCache, f: &mut Frame, area: Rect) {
     );
 
     let mut lines = vec![Line::from("!!! CLICK TO START !!!").bold().slow_blink()];
-    if app.high_score > 0 {
-        lines.push(Line::from(format!("SESSION BEST: {}", app.high_score)).cyan());
+    if app.user.high_score > 0 {
+        lines.push(Line::from(format!("SESSION BEST: {}", app.user.high_score)).cyan());
     }
     f.render_widget(
         Paragraph::new(lines).alignment(Alignment::Center),
@@ -232,14 +232,14 @@ fn render_game_over(
     render_leaderboard(app, cache, f, chunks[1], true);
 }
 
-fn render_leaderboard(app: &App, cache: &DbCache, f: &mut Frame, area: Rect, is_game_over: bool) {
+fn render_leaderboard(_app: &App, cache: &DbCache, f: &mut Frame, area: Rect, _is_game_over: bool) {
     let rows: Vec<Row> = cache
         .top_scores
         .iter()
         .enumerate()
         .map(|(i, entry)| {
             let pos = i + 1;
-            let is_own_entry = is_game_over && entry.name == app.player_name;
+            let is_own_entry = false; //is_game_over && entry.name == app.player_name;
             let style = if is_own_entry {
                 Style::default().bg(Color::DarkGray)
             } else {

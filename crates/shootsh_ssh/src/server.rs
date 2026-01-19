@@ -1,5 +1,6 @@
 use crate::input::InputTransformer;
 use ratatui::{Terminal, TerminalOptions, Viewport, backend::CrosstermBackend, layout::Rect};
+use russh::keys::ssh_key::PublicKey;
 use russh::server::{Auth, Handler, Msg, Session};
 use russh::*;
 use shootsh_core::db::{DbCache, DbRequest};
@@ -9,6 +10,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::mpsc;
+
 const CLEANUP_SEQ: &[u8] = b"\x1b[?1003l\x1b[?1006l\x1b[?1049l\x1b[?25h";
 
 /// A thread-safe wrapper around a byte buffer to capture TUI draw calls.
@@ -51,6 +53,7 @@ impl russh::server::Server for MyServer {
             connection_count: self.connection_count.clone(),
             terminal: Arc::new(Mutex::new(None)),
             output_buffer: SharedBuffer::default(),
+            fingerprint: Some(String::new()),
         }
     }
 }
@@ -66,6 +69,7 @@ pub struct ClientHandler {
     connection_count: Arc<AtomicUsize>,
     terminal: Arc<Mutex<Option<Terminal<CrosstermBackend<SharedBuffer>>>>>,
     output_buffer: SharedBuffer,
+    pub fingerprint: Option<String>,
 }
 
 impl ClientHandler {
@@ -126,7 +130,16 @@ impl ClientHandler {
 impl Handler for ClientHandler {
     type Error = russh::Error;
 
-    async fn auth_none(&mut self, _user: &str) -> std::result::Result<Auth, Self::Error> {
+    // async fn auth_none(&mut self, _user: &str) -> std::result::Result<Auth, Self::Error> {
+    //     Ok(Auth::Accept)
+    // }
+
+    async fn auth_publickey(&mut self, _user: &str, key: &PublicKey) -> Result<Auth, Self::Error> {
+        let fp = key
+            .fingerprint(russh::keys::ssh_key::HashAlg::Sha256)
+            .to_string();
+        self.fingerprint = Some(fp);
+
         Ok(Auth::Accept)
     }
 
@@ -183,14 +196,33 @@ impl Handler for ClientHandler {
         channel: ChannelId,
         session: &mut Session,
     ) -> std::result::Result<(), Self::Error> {
+        let fp = self.fingerprint.clone().expect("Should be authenticated");
+        let (tx, rx) = std::sync::mpsc::channel();
+
+        // send request
+        self.db_tx
+            .send(DbRequest::GetOrCreateUser {
+                fingerprint: fp.clone(),
+                reply_tx: tx,
+            })
+            .await
+            .map_err(|_| russh::Error::Inconsistent)?;
+
+        let user_context =
+            tokio::task::spawn_blocking(move || rx.recv_timeout(Duration::from_secs(2)))
+                .await
+                .map_err(|_| russh::Error::Inconsistent)? // JoinError
+                .map_err(|_| russh::Error::Inconsistent)?; // RecvTimeoutError
+
         let initial_size = *self.terminal_size.lock().unwrap();
-        let mut app = App::new(self.db_tx.clone(), self.shared_cache.clone());
+        let mut app = App::new(user_context, self.db_tx.clone(), self.shared_cache.clone());
         app.screen_size = initial_size;
+
+        let app_arc = Arc::new(Mutex::new(app));
+        self.app = Some(app_arc.clone());
 
         let terminal_handle = self.terminal.clone();
         let output_handle = self.output_buffer.clone();
-        let app_arc = Arc::new(Mutex::new(app));
-        self.app = Some(app_arc.clone());
 
         let _ = session.channel_success(channel);
         let _ = session.data(channel, "\x1b[?1049h\x1b[?1003h\x1b[?1006h\x1b[?25l".into());

@@ -1,7 +1,6 @@
-use crate::db::{DbCache, DbRequest};
+use crate::db::{DbCache, DbRequest, UserContext};
 use crate::domain::{
     CombatStats, MAX_PLAYER_NAME_LEN, MouseTrace, PLAYING_TIME_SEC, Point, Size, Target,
-    format_player_name,
 };
 use crate::validator::InteractionValidator;
 use anyhow::Result;
@@ -23,7 +22,7 @@ pub struct PlayingState {
 
 #[derive(Clone, PartialEq)]
 pub enum Scene {
-    Naming,
+    Naming(String),
     Menu,
     Playing(Box<PlayingState>),
     GameOver {
@@ -40,11 +39,10 @@ impl PartialEq for PlayingState {
 }
 
 pub struct App {
+    pub user: UserContext,
     pub scene: Scene,
-    pub player_name: String,
     pub db_cache: Arc<Mutex<Arc<DbCache>>>,
     pub db_tx: mpsc::Sender<DbRequest>,
-    pub high_score: u32,
     pub mouse_pos: Point,
     pub screen_size: Size,
     pub last_scene_change: Instant,
@@ -65,12 +63,21 @@ pub enum Action {
 }
 
 impl App {
-    pub fn new(db_tx: mpsc::Sender<DbRequest>, db_cache: Arc<Mutex<Arc<DbCache>>>) -> Self {
+    pub fn new(
+        user: UserContext,
+        db_tx: mpsc::Sender<DbRequest>,
+        db_cache: Arc<Mutex<Arc<DbCache>>>,
+    ) -> Self {
+        let initial_scene = if user.name.is_empty() || user.name == "NewPlayer" {
+            Scene::Naming(String::new())
+        } else {
+            Scene::Menu
+        };
+
         Self {
-            scene: Scene::Naming,
-            player_name: String::new(),
+            user,
+            scene: initial_scene,
             db_cache,
-            high_score: 0,
             mouse_pos: Point { x: 0, y: 0 },
             screen_size: Size::default(),
             last_scene_change: Instant::now(),
@@ -113,16 +120,17 @@ impl App {
 
     fn end_game(&mut self, stats: CombatStats) -> Result<()> {
         let final_score = stats.current_score();
-        let name = format_player_name(&self.player_name);
 
-        let _ = self.db_tx.try_send(DbRequest::SaveScore {
-            name,
+        let _ = self.db_tx.try_send(DbRequest::SaveGame {
+            user_id: self.user.id,
             score: final_score,
+            hits: stats.hit_count,
+            misses: stats.miss_count,
         });
 
-        let is_new_record = final_score > self.high_score;
+        let is_new_record = final_score > self.user.high_score;
         if is_new_record {
-            self.high_score = final_score;
+            self.user.high_score = final_score;
         }
 
         self.change_scene(Scene::GameOver {
@@ -201,9 +209,9 @@ impl App {
 
     fn handle_input_char(&mut self, c: char) {
         match &mut self.scene {
-            Scene::Naming => {
-                if self.player_name.chars().count() < MAX_PLAYER_NAME_LEN {
-                    self.player_name.push(c);
+            Scene::Naming(name) => {
+                if name.chars().count() < MAX_PLAYER_NAME_LEN {
+                    name.push(c);
                 }
             }
             Scene::Playing(_) if c == 'r' => self.start_game(),
@@ -213,14 +221,20 @@ impl App {
     }
 
     fn handle_delete_char(&mut self) {
-        if let Scene::Naming = self.scene {
-            self.player_name.pop();
+        if let Scene::Naming(name) = &mut self.scene {
+            name.pop();
         }
     }
 
     fn handle_submit_name(&mut self) {
-        if let Scene::Naming = self.scene {
-            if !self.player_name.trim().is_empty() {
+        if let Scene::Naming(name) = &mut self.scene {
+            let trimmed = name.trim().to_string();
+            if !trimmed.is_empty() {
+                let _ = self.db_tx.try_send(DbRequest::UpdateUsername {
+                    user_id: self.user.id,
+                    new_name: trimmed,
+                });
+
                 self.change_scene(Scene::Menu);
             }
         }
