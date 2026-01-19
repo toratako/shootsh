@@ -1,4 +1,4 @@
-use crate::app::{App, PLAYING_TIME, Scene};
+use crate::app::{App, PLAYING_TIME, PlayingState, Scene};
 use crate::db::DbCache;
 use ratatui::{prelude::*, widgets::*};
 use std::time::Duration;
@@ -20,7 +20,7 @@ pub fn render(app: &App, cache: &DbCache, f: &mut Frame) {
     match &app.scene {
         Scene::Naming => render_naming(app, f, area),
         Scene::Menu => render_menu(app, cache, f, area),
-        Scene::Playing { target } => render_playing(app, target, f, area),
+        Scene::Playing(state) => render_playing(state, app.current_score, f, area),
         Scene::GameOver {
             final_score,
             is_new_record,
@@ -165,26 +165,32 @@ fn render_menu(app: &App, cache: &DbCache, f: &mut Frame, area: Rect) {
     render_leaderboard(app, cache, f, chunks[2], false);
 }
 
-fn render_playing(app: &App, target: &crate::domain::Target, f: &mut Frame, area: Rect) {
+fn render_playing(state: &PlayingState, current_score: u32, f: &mut Frame, area: Rect) {
     let time_left =
-        Duration::from_secs(PLAYING_TIME.into()).saturating_sub(app.last_scene_change.elapsed());
+        Duration::from_secs(PLAYING_TIME.into()).saturating_sub(state.scene_start.elapsed());
 
     let stats = Paragraph::new(format!(
         " SCORE: {} | TIME: {}s ",
-        app.current_score,
+        current_score,
         time_left.as_secs()
     ))
     .bold();
 
     f.render_widget(stats, Rect::new(area.x, area.y, area.width, 1));
 
-    let target_rect = Rect::new(target.pos.x, target.pos.y, target.visual_width, 1);
+    let target_rect = Rect::new(
+        state.target.pos.x,
+        state.target.pos.y,
+        state.target.visual_width,
+        1,
+    );
     let visible_rect = target_rect.intersection(area);
 
     if !visible_rect.is_empty() {
         f.render_widget(Block::default().bg(Color::Red), visible_rect);
     }
 }
+
 fn render_game_over(
     app: &App,
     cache: &DbCache,

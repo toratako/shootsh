@@ -11,17 +11,29 @@ use tokio::sync::mpsc;
 pub const PLAYING_TIME: u16 = 15;
 pub const RANKING_LIMIT: u32 = 10;
 
-#[derive(PartialEq, Clone)]
+#[derive(Clone)]
+pub struct PlayingState {
+    pub target: Target,
+    pub mouse_history: VecDeque<MouseTrace>,
+    pub last_target_spawn: Instant,
+    pub scene_start: Instant,
+}
+
+#[derive(Clone, PartialEq)]
 pub enum Scene {
     Naming,
     Menu,
-    Playing {
-        target: Target,
-    },
+    Playing(Box<PlayingState>),
     GameOver {
         final_score: u32,
         is_new_record: bool,
     },
+}
+
+impl PartialEq for PlayingState {
+    fn eq(&self, other: &Self) -> bool {
+        self.target == other.target
+    }
 }
 
 pub struct App {
@@ -35,8 +47,6 @@ pub struct App {
     pub screen_size: Size,
     pub last_scene_change: Instant,
     pub should_quit: bool,
-    pub mouse_history: VecDeque<MouseTrace>,
-    pub last_target_spawn: Instant,
     validator: InteractionValidator,
     pub last_cheat_warning: Option<Instant>,
 }
@@ -67,8 +77,6 @@ impl App {
             },
             last_scene_change: Instant::now(),
             should_quit: false,
-            mouse_history: VecDeque::with_capacity(51),
-            last_target_spawn: Instant::now(),
             validator: InteractionValidator::new(Default::default()),
             last_cheat_warning: None,
             db_tx,
@@ -89,13 +97,6 @@ impl App {
         Ok(())
     }
 
-    fn prepare_for_next_target(&mut self) {
-        self.last_target_spawn = Instant::now();
-        self.mouse_history.clear();
-        self.mouse_history
-            .push_back(MouseTrace::new(self.mouse_pos.x, self.mouse_pos.y));
-    }
-
     pub fn change_scene(&mut self, new_scene: Scene) {
         self.scene = new_scene;
         self.last_scene_change = Instant::now();
@@ -103,16 +104,19 @@ impl App {
 
     fn start_game(&mut self) {
         self.current_score = 0;
-        let target = Target::new_random(self.screen_size.width, self.screen_size.height);
-        self.change_scene(Scene::Playing { target });
-        self.prepare_for_next_target();
+        let state = PlayingState {
+            target: Target::new_random(self.screen_size.width, self.screen_size.height),
+            mouse_history: VecDeque::from([MouseTrace::new(self.mouse_pos.x, self.mouse_pos.y)]),
+            last_target_spawn: Instant::now(),
+            scene_start: Instant::now(),
+        };
+        self.change_scene(Scene::Playing(Box::new(state)));
     }
 
     fn end_game(&mut self) -> Result<()> {
         let name = format_player_name(&self.player_name);
-
         let _ = self.db_tx.try_send(DbRequest::SaveScore {
-            name: name.clone(),
+            name,
             score: self.current_score,
         });
 
@@ -136,7 +140,7 @@ impl App {
             }
         }
 
-        if let Scene::Playing { .. } = self.scene {
+        if let Scene::Playing(_) = self.scene {
             if self.last_scene_change.elapsed() >= Duration::from_secs(PLAYING_TIME.into()) {
                 self.end_game()?;
             }
@@ -147,14 +151,10 @@ impl App {
     fn handle_mouse_move(&mut self, x: u16, y: u16) {
         self.mouse_pos = Point { x, y };
 
-        if let Scene::Playing { .. } = self.scene {
-            self.mouse_history.push_back(MouseTrace::new(x, y));
-            if self.mouse_history.len() > 50 {
-                self.mouse_history.pop_front();
-            }
-        } else {
-            if !self.mouse_history.is_empty() {
-                self.mouse_history.clear();
+        if let Scene::Playing(state) = &mut self.scene {
+            state.mouse_history.push_back(MouseTrace::new(x, y));
+            if state.mouse_history.len() > 50 {
+                state.mouse_history.pop_front();
             }
         }
     }
@@ -162,24 +162,27 @@ impl App {
     fn handle_hit(&mut self, x: u16, y: u16) -> Result<()> {
         match &mut self.scene {
             Scene::Menu => self.start_game(),
-            Scene::Playing { target } => {
-                if !target.is_hit(x, y) {
+            Scene::Playing(state) => {
+                if !state.target.is_hit(x, y) {
                     return Ok(());
                 }
 
                 let is_legit = self.validator.is_legit_interaction(
-                    &self.mouse_history.make_contiguous(),
-                    self.last_target_spawn,
+                    state.mouse_history.make_contiguous(),
+                    state.last_target_spawn,
                     Point { x, y },
                 );
 
                 if is_legit {
                     self.current_score += 1;
-                    *target = Target::new_random(self.screen_size.width, self.screen_size.height);
-                    self.prepare_for_next_target();
+                    state.target =
+                        Target::new_random(self.screen_size.width, self.screen_size.height);
+                    state.last_target_spawn = Instant::now();
+                    state.mouse_history.clear();
+                    state.mouse_history.push_back(MouseTrace::new(x, y));
                 } else {
                     self.last_cheat_warning = Some(Instant::now());
-                    self.mouse_history.clear();
+                    state.mouse_history.clear();
                 }
             }
 
@@ -194,18 +197,14 @@ impl App {
     }
 
     fn handle_input_char(&mut self, c: char) {
-        match self.scene {
+        match &mut self.scene {
             Scene::Naming => {
                 if self.player_name.chars().count() < MAX_PLAYER_NAME_LEN {
                     self.player_name.push(c);
                 }
             }
-            Scene::Playing { .. } if c == 'r' => {
-                self.start_game();
-            }
-            _ if c == 'q' => {
-                self.should_quit = true;
-            }
+            Scene::Playing(_) if c == 'r' => self.start_game(),
+            _ if c == 'q' => self.should_quit = true,
             _ => {}
         }
     }
