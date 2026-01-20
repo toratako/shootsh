@@ -23,6 +23,7 @@ pub struct DbCache {
 
 pub struct Repository {
     conn: Connection,
+    max_users: i64,
 }
 
 pub enum DbRequest {
@@ -43,9 +44,9 @@ pub enum DbRequest {
 }
 
 impl Repository {
-    pub fn new(conn: Connection) -> Result<Self> {
+    pub fn new(conn: Connection, max_users: i64) -> Result<Self> {
         self::setup_schema(&conn)?;
-        Ok(Self { conn })
+        Ok(Self { conn, max_users })
     }
 
     pub fn get_current_cache(&self) -> DbCache {
@@ -173,9 +174,9 @@ impl Repository {
     pub fn get_or_create_user_context(&self, fingerprint: &str) -> Result<UserContext> {
         let mut stmt = self.conn.prepare_cached(
             "SELECT u.id, u.username, IFNULL(s.high_score, 0) 
-             FROM users u 
-             LEFT JOIN user_stats s ON u.id = s.user_id 
-             WHERE u.fingerprint = ?1",
+         FROM users u 
+         LEFT JOIN user_stats s ON u.id = s.user_id 
+         WHERE u.fingerprint = ?1",
         )?;
 
         let res = stmt.query_row(params![fingerprint], |row| {
@@ -190,6 +191,7 @@ impl Repository {
         match res {
             Ok(ctx) => Ok(ctx),
             Err(rusqlite::Error::QueryReturnedNoRows) => {
+                self.enforce_user_limit()?;
                 let id = self.create_user(fingerprint, "NewPlayer")?;
                 Ok(UserContext {
                     id,
@@ -200,6 +202,31 @@ impl Repository {
             }
             Err(e) => Err(e.into()),
         }
+    }
+
+    fn enforce_user_limit(&self) -> Result<()> {
+        let count: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM users", [], |row| row.get(0))?;
+
+        if count >= self.max_users {
+            let deleted = self.conn.execute(
+                "DELETE FROM users 
+             WHERE id IN (
+                SELECT u.id FROM users u
+                LEFT JOIN user_stats s ON u.id = s.user_id
+                WHERE IFNULL(s.high_score, 0) = 0
+                ORDER BY u.created_at ASC
+                LIMIT 1
+             )",
+                [],
+            )?;
+
+            if deleted == 0 {
+                return Err(anyhow::anyhow!("User limit reached"));
+            }
+        }
+        Ok(())
     }
 }
 

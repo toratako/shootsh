@@ -14,10 +14,12 @@ use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 
+const DEFAULT_MAX_USERS: i64 = 100_000;
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let conn = Connection::open("shootsh.db").context("Failed to open DB")?;
-    let repo = Repository::new(conn).context("Failed to init repo")?;
+    let repo = Repository::new(conn, DEFAULT_MAX_USERS).context("Failed to init repo")?;
 
     let shared_cache = Arc::new(arc_swap::ArcSwap::from_pointee(repo.get_current_cache()));
 

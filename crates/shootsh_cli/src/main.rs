@@ -19,9 +19,12 @@ use std::{
 };
 use tokio::sync::mpsc;
 
+const DEFAULT_MAX_USERS: i64 = 100_000;
+
 fn main() -> Result<()> {
     let conn = Connection::open("shootsh.db").context("Failed to open database")?;
-    let repo = Repository::new(conn).context("Failed to initialize repository")?;
+    let repo =
+        Repository::new(conn, DEFAULT_MAX_USERS).context("Failed to initialize repository")?;
 
     let user_context = repo
         .get_or_create_user_context("local")
