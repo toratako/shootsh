@@ -9,7 +9,7 @@ pub struct AntiCheatConfig {
 impl Default for AntiCheatConfig {
     fn default() -> Self {
         Self {
-            min_reaction_time: Duration::from_millis(100),
+            min_reaction_time: Duration::from_millis(150),
             max_pixels_per_ms: 6.0,
         }
     }
@@ -44,30 +44,7 @@ impl InteractionValidator {
         if last_trace.time.duration_since(spawn_time) < self.config.min_reaction_time {
             return false;
         }
-
-        // check speed
-        if !self.has_plausible_speed(history) {
-            return false;
-        }
-
         true
-    }
-
-    fn has_plausible_speed(&self, history: &[MouseTrace]) -> bool {
-        if history.len() < 2 {
-            return true;
-        }
-        let max_px_per_ms_sq = self.config.max_pixels_per_ms.powi(2);
-
-        history.windows(2).all(|w| {
-            let dx = w[1].pos.x as f64 - w[0].pos.x as f64;
-            let dy = w[1].pos.y as f64 - w[0].pos.y as f64;
-            let dist_sq = dx.powi(2) + dy.powi(2);
-
-            let dt = w[1].time.duration_since(w[0].time).as_millis() as f64;
-
-            dt <= 0.0 || dist_sq <= max_px_per_ms_sq * dt.powi(2)
-        })
     }
 }
 
