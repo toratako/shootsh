@@ -38,7 +38,7 @@ pub enum DbRequest {
     },
     GetOrCreateUser {
         fingerprint: String,
-        reply_tx: std::sync::mpsc::Sender<UserContext>,
+        reply_tx: tokio::sync::oneshot::Sender<UserContext>,
     },
 }
 
@@ -60,9 +60,11 @@ impl Repository {
                 fingerprint,
                 reply_tx,
             } => {
-                if let Ok(ctx) = self.get_or_create_user_context(&fingerprint) {
-                    let _ = reply_tx.send(ctx);
-                }
+                let user_context = self
+                    .get_or_create_user_context(&fingerprint)
+                    .expect("Critical DB error");
+
+                let _ = reply_tx.send(user_context);
                 None
             }
             DbRequest::SaveGame {

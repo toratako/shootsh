@@ -172,22 +172,27 @@ impl Handler for ClientHandler {
         session: &mut Session,
     ) -> std::result::Result<(), Self::Error> {
         let fp = self.fingerprint.clone().expect("Should be authenticated");
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, rx) = tokio::sync::oneshot::channel();
 
         // send request
         self.db_tx
             .send(DbRequest::GetOrCreateUser {
-                fingerprint: fp.clone(),
+                fingerprint: fp,
                 reply_tx: tx,
             })
             .await
             .map_err(|_| russh::Error::Inconsistent)?;
 
-        let user_context =
-            tokio::task::spawn_blocking(move || rx.recv_timeout(Duration::from_secs(2)))
-                .await
-                .map_err(|_| russh::Error::Inconsistent)? // JoinError
-                .map_err(|_| russh::Error::Inconsistent)?; // RecvTimeoutError
+        let user_context = tokio::time::timeout(Duration::from_secs(2), rx)
+            .await
+            .map_err(|_| {
+                println!(
+                    "Login timeout for fingerprint: {}",
+                    self.fingerprint.as_deref().unwrap_or("?")
+                );
+                russh::Error::Inconsistent
+            })? // timeout error
+            .map_err(|_| russh::Error::Inconsistent)?; // oneshot recv error
 
         let initial_cache = self.shared_cache.load_full();
         let initial_size = *self.terminal_size.lock().unwrap();
