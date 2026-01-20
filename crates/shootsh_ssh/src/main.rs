@@ -7,6 +7,7 @@ use rusqlite::Connection;
 use russh::keys::ssh_key::rand_core::OsRng;
 use russh::server::Server as _;
 use shootsh_core::db::{DbCache, DbRequest, Repository};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -48,6 +49,7 @@ async fn main() -> Result<()> {
         db_tx,
         shared_cache,
         connection_count,
+        active_sessions: Arc::new(std::sync::Mutex::new(HashMap::new())),
     };
 
     let addr = "0.0.0.0:2222";

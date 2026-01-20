@@ -6,6 +6,7 @@ use russh::server::{Auth, Handler, Msg, Session};
 use russh::*;
 use shootsh_core::db::{DbCache, DbRequest};
 use shootsh_core::{Action, App, domain, ui};
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -41,6 +42,7 @@ pub struct MyServer {
     pub db_tx: mpsc::Sender<DbRequest>,
     pub shared_cache: Arc<ArcSwap<DbCache>>,
     pub connection_count: Arc<AtomicUsize>,
+    pub active_sessions: Arc<Mutex<HashMap<String, russh::server::Handle>>>,
 }
 
 impl russh::server::Server for MyServer {
@@ -63,7 +65,8 @@ impl russh::server::Server for MyServer {
             connection_count: self.connection_count.clone(),
             terminal: Arc::new(Mutex::new(None)),
             output_buffer: SharedBuffer::default(),
-            fingerprint: Some(String::new()),
+            fingerprint: None,
+            active_sessions: self.active_sessions.clone(),
         }
     }
 }
@@ -80,6 +83,7 @@ pub struct ClientHandler {
     terminal: Arc<Mutex<Option<Terminal<CrosstermBackend<SharedBuffer>>>>>,
     output_buffer: SharedBuffer,
     pub fingerprint: Option<String>,
+    pub active_sessions: Arc<Mutex<HashMap<String, russh::server::Handle>>>,
 }
 
 impl ClientHandler {
@@ -172,6 +176,17 @@ impl Handler for ClientHandler {
         session: &mut Session,
     ) -> std::result::Result<(), Self::Error> {
         let fp = self.fingerprint.clone().expect("Should be authenticated");
+
+        let old_handle = {
+            let mut sessions = self.active_sessions.lock().unwrap();
+            sessions.insert(fp.clone(), session.handle())
+        };
+
+        if let Some(old_handle) = old_handle {
+            let _ = old_handle.data(channel, CLEANUP_SEQ.into()).await;
+            let _ = old_handle.close(channel).await;
+        }
+
         let (tx, rx) = tokio::sync::oneshot::channel();
 
         // send request
