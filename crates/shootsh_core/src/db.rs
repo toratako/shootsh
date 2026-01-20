@@ -99,7 +99,7 @@ impl Repository {
             sessions, 
             high_score_at
         )
-        VALUES (?1, ?2, ?3, ?4, 1, DATETIME('now')) -- カンマを削除し、値を整理
+        VALUES (?1, ?2, ?3, ?4, 1, DATETIME('now'))
         ON CONFLICT(user_id) DO UPDATE SET
             high_score_at = CASE 
                 WHEN ?2 > high_score THEN DATETIME('now') 
@@ -119,7 +119,7 @@ impl Repository {
             "SELECT 
             u.username, 
             s.high_score, 
-            strftime('%m-%d %H:%M', s.high_score_at, 'localtime')
+            strftime('%m-%d %H:%M', s.high_score_at)
          FROM users u
          JOIN user_stats s ON u.id = s.user_id
          WHERE s.high_score > 0
@@ -203,12 +203,14 @@ impl Repository {
 }
 
 fn setup_schema(conn: &Connection) -> Result<()> {
+    conn.pragma_update(None, "journal_mode", &"WAL")?;
+
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             fingerprint TEXT UNIQUE NOT NULL,
             username TEXT UNIQUE NOT NULL,
-            created_at DATETIME DEFAULT (DATETIME('now', 'localtime'))
+            created_at DATETIME DEFAULT (DATETIME('now'))
         );
 
         CREATE TABLE IF NOT EXISTS user_stats (
@@ -217,13 +219,13 @@ fn setup_schema(conn: &Connection) -> Result<()> {
             total_hits INTEGER DEFAULT 0,
             total_misses INTEGER DEFAULT 0,
             sessions INTEGER DEFAULT 0,
-            high_score_at DATETIME DEFAULT (DATETIME('now', 'localtime')),
+            high_score_at DATETIME DEFAULT (DATETIME('now')),
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
 
         CREATE TABLE IF NOT EXISTS daily_activity (
             user_id INTEGER,
-            date DATE DEFAULT (DATE('now', 'localtime')),
+            date DATE DEFAULT (DATE('now')),
             count INTEGER DEFAULT 0,
             PRIMARY KEY (user_id, date),
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE

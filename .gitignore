@@ -1,4 +1,6 @@
 /target
-/shootsh.db
+*.db
+*.db-shm
+*.db-wal
 
 www/index.html
