@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SHOOT.SH</title>
+    <meta name="description" content="A terminal-based aim trainer.">
+    <link rel="icon" href="data:,">
+    <style>
+        :root {
+            --bg: #000;
+            --fg: #0f0;
+            --fg-visited: #008000;
+            --fg-hover: #afff00;
+        }
+
+        html,
+        body {
+            height: 100%;
+            margin: 0;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--fg);
+            font-family: monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+        }
+
+        main {
+            flex: 1;
+            width: 100%;
+            max-width: 600px;
+            padding: 2rem;
+            box-sizing: border-box;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            margin: 0;
+        }
+
+        .cmd-line {
+            display: block;
+            margin: 2.5rem 0;
+        }
+
+        kbd {
+            font-weight: bold;
+            font-size: 1.5rem;
+        }
+
+        kbd::before {
+            content: "$ ";
+        }
+
+        section {
+            margin: 2rem 0;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+
+        th,
+        td {
+            padding: 0.5rem;
+            border-bottom: 1px dashed var(--fg-visited);
+        }
+
+        th {
+            border-bottom: 1px solid var(--fg);
+            text-transform: uppercase;
+        }
+
+        a {
+            color: var(--fg);
+            text-decoration: underline;
+        }
+
+        a:visited {
+            color: var(--fg-visited);
+        }
+
+        a:hover,
+        a:focus {
+            color: var(--fg-hover);
+            outline: none;
+        }
+
+        footer {
+            width: 100%;
+            max-width: 600px;
+            padding: 2rem 0;
+            border-top: 1px solid var(--fg);
+        }
+
+        small {
+            display: block;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+
+<body>
+
+    <main>
+        <header>
+            <h1>SHOOT.SH</h1>
+        </header>
+
+        <code class="cmd-line"><kbd>ssh shoot.sh</kbd></code>
+
+        <section>
+            <h2>Lifetime Leaderboard</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Rank</th>
+                        <th>Name</th>
+                        <th>Score</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    LEADERBOARD_TEMPLATE
+                </tbody>
+            </table>
+        </section>
+    </main>
+
+    <footer>
+        <small>
+            Made by <a href="https://toratako.gitlab.io/blog/" target="_blank" rel="noopener">toratako</a><br>
+            Released under <a href="https://opensource.org/license/unlicense" target="_blank" rel="noopener">The
+                Unlicense</a><br>
+            last updated: <time datetime="UPDATED_TEMPLATE">UPDATED_TEMPLATE</time>
+        </small>
+    </footer>
+
+</body>
+
+</html>
