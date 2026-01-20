@@ -7,7 +7,7 @@ const COMBO_MULTIPLIER_STEP: f64 = 0.2;
 const INITIAL_MULTIPLIER: f64 = 1.0;
 const MAX_MULTIPLIER: f64 = 3.0;
 const DECAY_RATE: f64 = 0.95;
-const MAX_TARGET_LIFETIME_MS: u64 = 2000;
+const MAX_TARGET_LIFETIME_MS: u64 = 1800;
 
 #[derive(PartialEq, Clone, Copy, Debug, Default)]
 pub struct Size {
@@ -160,6 +160,10 @@ impl Target {
             .saturating_add(self.hit_margin_x);
 
         x >= left_edge && x < right_edge
+    }
+
+    pub fn is_expired(&self, elapsed: Duration, stats: &CombatStats) -> bool {
+        elapsed >= stats.get_target_lifetime()
     }
 }
 

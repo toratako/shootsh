@@ -145,9 +145,20 @@ impl App {
             self.last_cheat_warning = None;
         }
 
-        if let Scene::Playing(state) = &self.scene {
+        if let Scene::Playing(state) = &mut self.scene {
             if state.scene_start.elapsed() >= Duration::from_secs(PLAYING_TIME_SEC.into()) {
-                self.end_game(state.combat_stats.clone())?;
+                let stats = state.combat_stats.clone();
+                return self.end_game(stats);
+            }
+
+            if state
+                .target
+                .is_expired(state.last_target_spawn.elapsed(), &state.combat_stats)
+            {
+                state.combat_stats.register_miss();
+                state.target = Target::new_random(self.screen_size);
+                state.last_target_spawn = Instant::now();
+                state.mouse_history.clear();
             }
         }
         Ok(())
