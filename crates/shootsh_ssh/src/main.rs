@@ -38,7 +38,7 @@ async fn main() -> Result<()> {
     });
 
     let config = Arc::new(russh::server::Config {
-        inactivity_timeout: Some(Duration::from_secs(3600)),
+        inactivity_timeout: Some(Duration::from_secs(60 * 10)),
         auth_rejection_time: Duration::from_secs(3),
         keys: vec![
             russh::keys::PrivateKey::random(&mut OsRng, russh::keys::Algorithm::Ed25519)
