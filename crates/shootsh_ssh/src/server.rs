@@ -289,9 +289,9 @@ impl Handler for ClientHandler {
     }
     async fn data(
         &mut self,
-        channel: ChannelId,
+        _channel: ChannelId,
         data: &[u8],
-        session: &mut Session,
+        _session: &mut Session,
     ) -> std::result::Result<(), Self::Error> {
         let app_arc = match &self.app {
             Some(a) => a,
@@ -301,18 +301,13 @@ impl Handler for ClientHandler {
         let actions = self.input_transformer.handle_input(data);
 
         if !actions.is_empty() {
-            let mut app = app_arc.lock().unwrap();
-            app.db_cache = self.shared_cache.load_full();
-
-            for act in actions {
-                app.update_state(act).ok();
+            {
+                let mut app = app_arc.lock().unwrap();
+                for act in actions {
+                    app.update_state(act).ok();
+                }
             }
-
-            let mut term_guard = self.terminal.lock().unwrap();
-            if let Some(ref mut term) = *term_guard {
-                let buffer = Self::render_frame(&app, term, &self.output_buffer);
-                let _ = session.data(channel, buffer.into());
-            }
+            let _ = self.update_tx.send(());
         }
 
         Ok(())
