@@ -68,6 +68,7 @@ impl CombatStats {
     /// Reset combo
     pub fn register_miss(&mut self) {
         self.combo = 0;
+        self.miss_count += 1;
     }
 
     pub fn current_score(&self) -> u32 {
