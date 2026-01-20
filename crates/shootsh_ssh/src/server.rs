@@ -308,6 +308,7 @@ impl Handler for ClientHandler {
         if !actions.is_empty() {
             {
                 let mut app = app_arc.lock().unwrap();
+                app.screen_size = *self.terminal_size.lock().unwrap();
                 for act in actions {
                     app.update_state(act).ok();
                 }
