@@ -105,128 +105,60 @@ impl ClientHandler {
 
         output
     }
-}
-impl Handler for ClientHandler {
-    type Error = russh::Error;
 
-    // async fn auth_none(&mut self, _user: &str) -> std::result::Result<Auth, Self::Error> {
-    //     Ok(Auth::Accept)
-    // }
-
-    async fn auth_publickey(&mut self, _user: &str, key: &PublicKey) -> Result<Auth, Self::Error> {
-        let fp = key
-            .fingerprint(russh::keys::ssh_key::HashAlg::Sha256)
-            .to_string();
-        self.fingerprint = Some(fp);
-
-        Ok(Auth::Accept)
-    }
-
-    async fn channel_open_session(
-        &mut self,
-        _channel: Channel<Msg>,
-        _session: &mut Session,
-    ) -> std::result::Result<bool, Self::Error> {
-        Ok(true)
-    }
-
-    async fn pty_request(
-        &mut self,
+    async fn kick_existing_session(
+        &self,
+        fp: &str,
         channel: ChannelId,
-        _term: &str,
-        col_width: u32,
-        row_height: u32,
-        _pix_width: u32,
-        _pix_height: u32,
-        _modes: &[(Pty, u32)],
-        session: &mut Session,
-    ) -> std::result::Result<(), Self::Error> {
-        if let Ok(mut sz) = self.terminal_size.lock() {
-            *sz = domain::Size {
-                width: col_width as u16,
-                height: row_height as u16,
-            };
-        }
-        let _ = session.channel_success(channel);
-        Ok(())
-    }
-
-    async fn window_change_request(
-        &mut self,
-        _channel: ChannelId,
-        col_width: u32,
-        row_height: u32,
-        _pix_width: u32,
-        _pix_height: u32,
-        _session: &mut Session,
-    ) -> std::result::Result<(), Self::Error> {
-        if let Ok(mut sz) = self.terminal_size.lock() {
-            *sz = domain::Size {
-                width: col_width as u16,
-                height: row_height as u16,
-            };
-        }
-        let _ = self.update_tx.send(());
-        Ok(())
-    }
-
-    async fn shell_request(
-        &mut self,
-        channel: ChannelId,
-        session: &mut Session,
-    ) -> std::result::Result<(), Self::Error> {
-        let fp = self.fingerprint.clone().expect("Should be authenticated");
-
+        current_handle: russh::server::Handle,
+    ) {
         let old_handle = {
             let mut sessions = self.active_sessions.lock().unwrap();
-            sessions.insert(fp.clone(), session.handle())
+            sessions.insert(fp.to_string(), current_handle)
         };
 
         if let Some(old_handle) = old_handle {
             let _ = old_handle.data(channel, CLEANUP_SEQ.into()).await;
             let _ = old_handle.close(channel).await;
         }
+    }
 
+    async fn fetch_user_context(
+        &self,
+        fp: &str,
+    ) -> Result<shootsh_core::db::UserContext, russh::Error> {
         let (tx, rx) = tokio::sync::oneshot::channel();
 
-        // send request
         self.db_tx
             .send(DbRequest::GetOrCreateUser {
-                fingerprint: fp,
+                fingerprint: fp.to_string(),
                 reply_tx: tx,
             })
             .await
             .map_err(|_| russh::Error::Inconsistent)?;
 
-        let user_context = tokio::time::timeout(Duration::from_secs(2), rx)
+        tokio::time::timeout(Duration::from_secs(2), rx)
             .await
             .map_err(|_| {
-                println!(
-                    "Login timeout for fingerprint: {}",
-                    self.fingerprint.as_deref().unwrap_or("?")
-                );
+                println!("Login timeout for fingerprint: {}", fp);
                 russh::Error::Inconsistent
             })? // timeout error
-            .map_err(|_| russh::Error::Inconsistent)?; // oneshot recv error
+            .map_err(|_| russh::Error::Inconsistent) // oneshot recv error
+    }
 
-        let initial_cache = self.shared_cache.load_full();
-        let initial_size = *self.terminal_size.lock().unwrap();
-        let mut app = App::new(user_context, self.db_tx.clone(), initial_cache);
-        app.screen_size = initial_size;
-
-        let app_arc = Arc::new(Mutex::new(app));
-        self.app = Some(app_arc.clone());
-
-        let _ = session.channel_success(channel);
-        let _ = session.data(channel, "\x1b[?1049h\x1b[?1003h\x1b[?1006h\x1b[?25l".into());
-
+    fn run_render_loop(
+        &self,
+        channel: ChannelId,
+        session_handle: russh::server::Handle,
+        app: Arc<Mutex<App>>,
+    ) {
         let ctx = RenderContext {
-            app: app_arc.clone(),
+            app,
             terminal: self.terminal.clone(),
             output_buffer: self.output_buffer.clone(),
             terminal_size: self.terminal_size.clone(),
             shared_cache: self.shared_cache.clone(),
-            session_handle: session.handle(),
+            session_handle: session_handle.clone(),
         };
 
         let mut rx = self.update_rx.lock().unwrap().take();
@@ -304,9 +236,97 @@ impl Handler for ClientHandler {
                 }
             }
         });
+    }
+}
+
+impl Handler for ClientHandler {
+    type Error = russh::Error;
+
+    async fn auth_publickey(&mut self, _user: &str, key: &PublicKey) -> Result<Auth, Self::Error> {
+        let fp = key
+            .fingerprint(russh::keys::ssh_key::HashAlg::Sha256)
+            .to_string();
+        self.fingerprint = Some(fp);
+
+        Ok(Auth::Accept)
+    }
+
+    async fn channel_open_session(
+        &mut self,
+        _channel: Channel<Msg>,
+        _session: &mut Session,
+    ) -> std::result::Result<bool, Self::Error> {
+        Ok(true)
+    }
+
+    async fn pty_request(
+        &mut self,
+        channel: ChannelId,
+        _term: &str,
+        col_width: u32,
+        row_height: u32,
+        _pix_width: u32,
+        _pix_height: u32,
+        _modes: &[(Pty, u32)],
+        session: &mut Session,
+    ) -> std::result::Result<(), Self::Error> {
+        if let Ok(mut sz) = self.terminal_size.lock() {
+            *sz = domain::Size {
+                width: col_width as u16,
+                height: row_height as u16,
+            };
+        }
+        let _ = session.channel_success(channel);
+        Ok(())
+    }
+
+    async fn window_change_request(
+        &mut self,
+        _channel: ChannelId,
+        col_width: u32,
+        row_height: u32,
+        _pix_width: u32,
+        _pix_height: u32,
+        _session: &mut Session,
+    ) -> std::result::Result<(), Self::Error> {
+        if let Ok(mut sz) = self.terminal_size.lock() {
+            *sz = domain::Size {
+                width: col_width as u16,
+                height: row_height as u16,
+            };
+        }
+        let _ = self.update_tx.send(());
+        Ok(())
+    }
+
+    async fn shell_request(
+        &mut self,
+        channel: ChannelId,
+        session: &mut Session,
+    ) -> std::result::Result<(), Self::Error> {
+        let fp = self.fingerprint.clone().expect("Should be authenticated");
+
+        self.kick_existing_session(&fp, channel, session.handle())
+            .await;
+
+        let user_context = self.fetch_user_context(&fp).await?;
+
+        let initial_cache = self.shared_cache.load_full();
+        let mut app = App::new(user_context, self.db_tx.clone(), initial_cache);
+        let initial_size = *self.terminal_size.lock().unwrap();
+        app.screen_size = initial_size;
+
+        let app_arc = Arc::new(Mutex::new(app));
+        self.app = Some(app_arc.clone());
+
+        let _ = session.channel_success(channel);
+        let _ = session.data(channel, "\x1b[?1049h\x1b[?1003h\x1b[?1006h\x1b[?25l".into());
+
+        self.run_render_loop(channel, session.handle(), app_arc);
 
         Ok(())
     }
+
     async fn data(
         &mut self,
         _channel: ChannelId,
