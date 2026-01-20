@@ -23,6 +23,7 @@ impl std::io::Write for SharedBuffer {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         self.0.lock().unwrap().write(buf)
     }
+
     fn flush(&mut self) -> std::io::Result<()> {
         self.0.lock().unwrap().flush()
     }
@@ -168,6 +169,7 @@ impl ClientHandler {
                 handle: russh::server::Handle,
                 chan: ChannelId,
             }
+
             impl Drop for DropGuard {
                 fn drop(&mut self) {
                     let h = self.handle.clone();
@@ -178,6 +180,7 @@ impl ClientHandler {
                     });
                 }
             }
+
             let _guard = DropGuard {
                 handle: ctx.session_handle.clone(),
                 chan: channel,
@@ -357,6 +360,7 @@ impl Handler for ClientHandler {
 
 impl Drop for ClientHandler {
     fn drop(&mut self) {
+        // DO NOT REMOVE SESSION HERE! (kick_existing_session handles this well)
         let count = self.connection_count.fetch_sub(1, Ordering::Relaxed) - 1;
         println!("Connection closed. Active: {}", count);
     }
