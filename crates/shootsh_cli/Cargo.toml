@@ -12,3 +12,4 @@ rand = "0.9.2"
 ratatui = "0.30.0"
 rusqlite = { version = "0.38.0", features = ["bundled"] }
 tokio = { version = "1.49.0", features = ["full"] }
+arc-swap = "1.8.0"

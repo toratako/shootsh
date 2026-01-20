@@ -1,4 +1,5 @@
 use crate::input::InputTransformer;
+use arc_swap::ArcSwap;
 use ratatui::{Terminal, TerminalOptions, Viewport, backend::CrosstermBackend, layout::Rect};
 use russh::keys::ssh_key::PublicKey;
 use russh::server::{Auth, Handler, Msg, Session};
@@ -26,10 +27,19 @@ impl std::io::Write for SharedBuffer {
     }
 }
 
+struct RenderContext {
+    app: Arc<Mutex<App>>,
+    terminal: Arc<Mutex<Option<Terminal<CrosstermBackend<SharedBuffer>>>>>,
+    output_buffer: SharedBuffer,
+    terminal_size: Arc<Mutex<domain::Size>>,
+    shared_cache: Arc<ArcSwap<DbCache>>,
+    session_handle: russh::server::Handle,
+}
+
 #[derive(Clone)]
 pub struct MyServer {
     pub db_tx: mpsc::Sender<DbRequest>,
-    pub shared_cache: Arc<Mutex<Arc<DbCache>>>,
+    pub shared_cache: Arc<ArcSwap<DbCache>>,
     pub connection_count: Arc<AtomicUsize>,
 }
 
@@ -60,7 +70,7 @@ impl russh::server::Server for MyServer {
 
 pub struct ClientHandler {
     db_tx: mpsc::Sender<DbRequest>,
-    shared_cache: Arc<Mutex<Arc<DbCache>>>,
+    pub shared_cache: Arc<ArcSwap<DbCache>>,
     app: Option<Arc<Mutex<App>>>,
     input_transformer: InputTransformer,
     terminal_size: Arc<Mutex<domain::Size>>,
@@ -74,53 +84,18 @@ pub struct ClientHandler {
 
 impl ClientHandler {
     fn render_frame(
-        app: &mut App,
-        size: domain::Size,
-        terminal_lock: &Arc<Mutex<Option<Terminal<CrosstermBackend<SharedBuffer>>>>>,
+        app: &App,
+        terminal: &mut Terminal<CrosstermBackend<SharedBuffer>>,
         shared_output: &SharedBuffer,
     ) -> Vec<u8> {
-        let cache_snapshot: Arc<DbCache> = {
-            let lock = app.db_cache.lock().unwrap();
-            Arc::clone(&*lock)
-        };
-
-        app.screen_size = size;
-
-        let mut terminal_guard = terminal_lock.lock().unwrap();
-        if terminal_guard.is_none() {
-            let backend = CrosstermBackend::new(shared_output.clone());
-            let area = Rect::new(0, 0, size.width, size.height);
-            *terminal_guard = Some(
-                Terminal::with_options(
-                    backend,
-                    TerminalOptions {
-                        viewport: Viewport::Fixed(area),
-                    },
-                )
-                .expect("Failed to create terminal"),
-            );
-        }
-
-        let terminal = terminal_guard.as_mut().unwrap();
-
-        let current_area = Rect::new(0, 0, size.width, size.height);
-        if terminal.size().unwrap() != current_area.into() {
-            terminal
-                .resize(current_area)
-                .expect("Failed to resize terminal");
-        }
-
-        // Write Arc<Mutex<Vec<u8>>> via SharedBuffer
         terminal
             .draw(|f| {
-                ui::render(app, &cache_snapshot, f);
+                ui::render(app, &app.db_cache, f);
                 f.set_cursor_position(ratatui::layout::Position::new(0, 0));
             })
             .expect("Failed to draw frame");
 
-        let mut output = Vec::new();
-        output.extend_from_slice(b"\x1b[?25l");
-
+        let mut output = Vec::from(b"\x1b[?25l");
         let mut internal_vec = shared_output.0.lock().unwrap();
         output.extend(std::mem::take(&mut *internal_vec));
 
@@ -214,22 +189,27 @@ impl Handler for ClientHandler {
                 .map_err(|_| russh::Error::Inconsistent)? // JoinError
                 .map_err(|_| russh::Error::Inconsistent)?; // RecvTimeoutError
 
+        let initial_cache = self.shared_cache.load_full();
         let initial_size = *self.terminal_size.lock().unwrap();
-        let mut app = App::new(user_context, self.db_tx.clone(), self.shared_cache.clone());
+        let mut app = App::new(user_context, self.db_tx.clone(), initial_cache);
         app.screen_size = initial_size;
 
         let app_arc = Arc::new(Mutex::new(app));
         self.app = Some(app_arc.clone());
 
-        let terminal_handle = self.terminal.clone();
-        let output_handle = self.output_buffer.clone();
-
         let _ = session.channel_success(channel);
         let _ = session.data(channel, "\x1b[?1049h\x1b[?1003h\x1b[?1006h\x1b[?25l".into());
 
+        let ctx = RenderContext {
+            app: app_arc.clone(),
+            terminal: self.terminal.clone(),
+            output_buffer: self.output_buffer.clone(),
+            terminal_size: self.terminal_size.clone(),
+            shared_cache: self.shared_cache.clone(),
+            session_handle: session.handle(),
+        };
+
         let mut rx = self.update_rx.lock().unwrap().take();
-        let session_handle = session.handle();
-        let size_handle = self.terminal_size.clone();
 
         tokio::spawn(async move {
             struct DropGuard {
@@ -247,7 +227,7 @@ impl Handler for ClientHandler {
                 }
             }
             let _guard = DropGuard {
-                handle: session_handle.clone(),
+                handle: ctx.session_handle.clone(),
                 chan: channel,
             };
 
@@ -263,20 +243,43 @@ impl Handler for ClientHandler {
                 }
 
                 let render_result = {
-                    let mut app = match app_arc.lock() {
-                        Ok(a) => a,
-                        Err(_) => break,
-                    };
-                    let sz = *size_handle.lock().unwrap();
+                    let mut app = ctx.app.lock().unwrap();
+                    let sz = *ctx.terminal_size.lock().unwrap();
+                    app.db_cache = ctx.shared_cache.load_full();
+
                     app.update_state(Action::Tick).ok();
+
+                    let mut term_guard = ctx.terminal.lock().unwrap();
+                    let term = term_guard.get_or_insert_with(|| {
+                        let backend = CrosstermBackend::new(ctx.output_buffer.clone());
+                        Terminal::with_options(
+                            backend,
+                            TerminalOptions {
+                                viewport: Viewport::Fixed(Rect::new(0, 0, sz.width, sz.height)),
+                            },
+                        )
+                        .expect("Failed to create terminal")
+                    });
+
+                    let current_area = Rect::new(0, 0, sz.width, sz.height);
+                    if term.size().unwrap() != current_area.into() {
+                        term.resize(current_area).ok();
+                    }
+
                     (
-                        Self::render_frame(&mut app, sz, &terminal_handle, &output_handle),
+                        Self::render_frame(&app, term, &ctx.output_buffer),
                         app.should_quit,
                     )
                 };
 
                 let (buffer, should_quit) = render_result;
-                if session_handle.data(channel, buffer.into()).await.is_err() || should_quit {
+                if ctx
+                    .session_handle
+                    .data(channel, buffer.into())
+                    .await
+                    .is_err()
+                    || should_quit
+                {
                     break;
                 }
             }
@@ -298,15 +301,18 @@ impl Handler for ClientHandler {
         let actions = self.input_transformer.handle_input(data);
 
         if !actions.is_empty() {
-            let buffer = {
-                let mut app = app_arc.lock().unwrap();
-                let sz = *self.terminal_size.lock().unwrap();
-                for act in actions {
-                    app.update_state(act).ok();
-                }
-                Self::render_frame(&mut app, sz, &self.terminal, &self.output_buffer)
-            };
-            let _ = session.data(channel, buffer.into());
+            let mut app = app_arc.lock().unwrap();
+            app.db_cache = self.shared_cache.load_full();
+
+            for act in actions {
+                app.update_state(act).ok();
+            }
+
+            let mut term_guard = self.terminal.lock().unwrap();
+            if let Some(ref mut term) = *term_guard {
+                let buffer = Self::render_frame(&app, term, &self.output_buffer);
+                let _ = session.data(channel, buffer.into());
+            }
         }
 
         Ok(())

@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use arc_swap::ArcSwap;
 use crossterm::{
     event::{self, Event, KeyCode, MouseButton, MouseEventKind},
     execute,
@@ -13,7 +14,7 @@ use shootsh_core::{
 };
 use std::{
     io,
-    sync::{Arc, Mutex},
+    sync::Arc,
     time::{Duration, Instant},
 };
 use tokio::sync::mpsc;
@@ -27,21 +28,18 @@ fn main() -> Result<()> {
         .context("Failed to get or create local user")?;
 
     let (db_tx, mut db_rx) = mpsc::channel::<DbRequest>(100);
-    let shared_cache = Arc::new(Mutex::new(Arc::new(repo.get_current_cache())));
+    let shared_cache = Arc::new(ArcSwap::from_pointee(repo.get_current_cache()));
 
     let worker_cache = Arc::clone(&shared_cache);
     std::thread::spawn(move || {
         while let Some(req) = db_rx.blocking_recv() {
             if let Some(new_cache) = repo.handle_request(req) {
-                let new_arc = Arc::new(new_cache);
-                if let Ok(mut lock) = worker_cache.lock() {
-                    *lock = new_arc;
-                }
+                worker_cache.store(Arc::new(new_cache));
             }
         }
     });
 
-    let mut app = App::new(user_context, db_tx, Arc::clone(&shared_cache));
+    let mut app = App::new(user_context, db_tx, shared_cache.load_full());
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -59,7 +57,7 @@ fn main() -> Result<()> {
     }));
 
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout))?;
-    let res = run_loop(&mut app, &mut terminal);
+    let res = run_loop(&mut app, &mut terminal, shared_cache);
 
     execute!(
         terminal.backend_mut(),
@@ -76,7 +74,11 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn run_loop<B: Backend>(app: &mut App, terminal: &mut Terminal<B>) -> Result<()>
+fn run_loop<B: Backend>(
+    app: &mut App,
+    terminal: &mut Terminal<B>,
+    shared_cache: Arc<ArcSwap<shootsh_core::db::DbCache>>,
+) -> Result<()>
 where
     <B as Backend>::Error: std::error::Error + Send + Sync + 'static,
 {
@@ -84,6 +86,8 @@ where
     let mut last_tick = Instant::now();
 
     while !app.should_quit {
+        app.db_cache = shared_cache.load_full();
+
         if let Ok(size) = terminal.size() {
             app.screen_size = domain::Size {
                 width: size.width,
@@ -91,17 +95,11 @@ where
             };
         }
 
-        {
-            let cache_snapshot = {
-                let lock = app.db_cache.lock().unwrap();
-                Arc::clone(&*lock)
-            };
 
-            terminal.draw(|f| {
-                ui::render(app, &cache_snapshot, f);
-            })?;
-        }
-
+        terminal.draw(|f| {
+            ui::render(app, &app.db_cache, f);
+        })?;
+        
         let timeout = tick_rate.saturating_sub(last_tick.elapsed());
         if event::poll(timeout)? {
             let ev = event::read()?;

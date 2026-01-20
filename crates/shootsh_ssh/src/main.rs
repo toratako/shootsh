@@ -1,14 +1,14 @@
 mod input;
 mod server;
-
 use crate::server::MyServer;
 use anyhow::{Context, Result};
+use arc_swap::ArcSwap;
 use rusqlite::Connection;
 use russh::keys::ssh_key::rand_core::OsRng;
 use russh::server::Server as _;
 use shootsh_core::db::{DbCache, DbRequest, Repository};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
@@ -18,8 +18,8 @@ async fn main() -> Result<()> {
     let conn = Connection::open("shootsh.db").context("Failed to open DB")?;
     let repo = Repository::new(conn).context("Failed to init repo")?;
 
-    let shared_cache = Arc::new(Mutex::new(Arc::new(repo.get_current_cache())));
-
+    let shared_cache = Arc::new(arc_swap::ArcSwap::from_pointee(repo.get_current_cache()));
+    
     let (db_tx, db_rx) = mpsc::channel::<DbRequest>(100);
     spawn_db_worker(repo, Arc::clone(&shared_cache), db_rx);
 
@@ -60,16 +60,13 @@ async fn main() -> Result<()> {
 
 fn spawn_db_worker(
     repo: Repository,
-    cache: Arc<Mutex<Arc<DbCache>>>,
+    cache: Arc<ArcSwap<DbCache>>,
     mut rx: mpsc::Receiver<DbRequest>,
 ) {
     std::thread::spawn(move || {
         while let Some(req) = rx.blocking_recv() {
             if let Some(new_cache) = repo.handle_request(req) {
-                let new_arc = Arc::new(new_cache);
-                if let Ok(mut lock) = cache.lock() {
-                    *lock = new_arc;
-                }
+                cache.store(Arc::new(new_cache));
             }
         }
     });

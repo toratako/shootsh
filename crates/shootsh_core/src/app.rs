@@ -5,7 +5,7 @@ use crate::domain::{
 use crate::validator::InteractionValidator;
 use anyhow::Result;
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
@@ -41,7 +41,7 @@ impl PartialEq for PlayingState {
 pub struct App {
     pub user: UserContext,
     pub scene: Scene,
-    pub db_cache: Arc<Mutex<Arc<DbCache>>>,
+    pub db_cache: Arc<DbCache>,
     pub db_tx: mpsc::Sender<DbRequest>,
     pub mouse_pos: Point,
     pub screen_size: Size,
@@ -63,11 +63,7 @@ pub enum Action {
 }
 
 impl App {
-    pub fn new(
-        user: UserContext,
-        db_tx: mpsc::Sender<DbRequest>,
-        db_cache: Arc<Mutex<Arc<DbCache>>>,
-    ) -> Self {
+    pub fn new(user: UserContext, db_tx: mpsc::Sender<DbRequest>, db_cache: Arc<DbCache>) -> Self {
         let initial_scene = if user.name.is_empty() || user.name == "NewPlayer" {
             Scene::Naming(String::new())
         } else {
