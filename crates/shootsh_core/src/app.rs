@@ -176,7 +176,7 @@ impl App {
                 }
 
                 let is_legit = self.validator.is_legit_interaction(
-                    state.mouse_history.make_contiguous(),
+                    &state.mouse_history,
                     state.last_target_spawn,
                     Point { x, y },
                 );

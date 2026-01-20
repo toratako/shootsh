@@ -1,6 +1,6 @@
 use crate::domain::{MouseTrace, Point};
+use std::collections::VecDeque;
 use std::time::{Duration, Instant};
-
 pub struct AntiCheatConfig {
     pub min_reaction_time: Duration,
     pub max_pixels_per_ms: f64,
@@ -26,11 +26,11 @@ impl InteractionValidator {
 
     pub fn is_legit_interaction(
         &self,
-        history: &[MouseTrace],
+        history: &VecDeque<MouseTrace>,
         spawn_time: Instant,
         click_pos: Point,
     ) -> bool {
-        let last_trace = match history.last() {
+        let last_trace = match history.back() {
             Some(t) => t,
             None => return false,
         };
@@ -56,10 +56,10 @@ mod tests {
     fn test_human_reaction_speed() {
         let v = InteractionValidator::new(AntiCheatConfig::default());
         let spawn = Instant::now();
-        let history = vec![MouseTrace {
+        let history = VecDeque::from(vec![MouseTrace {
             pos: Point { x: 1, y: 1 },
             time: spawn + Duration::from_millis(200),
-        }];
+        }]);
         assert!(v.is_legit_interaction(&history, spawn, Point { x: 1, y: 1 }));
     }
 
@@ -67,10 +67,10 @@ mod tests {
     fn test_bot_reaction_speed() {
         let v = InteractionValidator::new(AntiCheatConfig::default());
         let spawn = Instant::now();
-        let history = vec![MouseTrace {
+        let history = VecDeque::from(vec![MouseTrace {
             pos: Point { x: 1, y: 1 },
             time: spawn + Duration::from_millis(50),
-        }];
+        }]);
         assert!(!v.is_legit_interaction(&history, spawn, Point { x: 1, y: 1 }));
     }
 
@@ -79,24 +79,23 @@ mod tests {
         let v = InteractionValidator::new(AntiCheatConfig::default());
         let spawn = Instant::now();
 
-        let history = vec![MouseTrace {
+        let history = VecDeque::from(vec![MouseTrace {
             pos: Point { x: 10, y: 10 },
             time: spawn + Duration::from_millis(200),
-        }];
+        }]);
 
         // warp from (10, 10) to (50, 50)
         let click_pos = Point { x: 50, y: 50 };
-
-        assert!(!v.is_legit_interaction(&history, spawn, click_pos),);
+        assert!(!v.is_legit_interaction(&history, spawn, click_pos));
     }
 
     #[test]
     fn test_empty_history_should_fail() {
         let v = InteractionValidator::new(AntiCheatConfig::default());
         let spawn = Instant::now();
-        let history = vec![];
+        let history = VecDeque::new();
         let click_pos = Point { x: 10, y: 10 };
 
-        assert!(!v.is_legit_interaction(&history, spawn, click_pos),);
+        assert!(!v.is_legit_interaction(&history, spawn, click_pos));
     }
 }
