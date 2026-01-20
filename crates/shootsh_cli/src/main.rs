@@ -33,8 +33,11 @@ fn main() -> Result<()> {
     let worker_cache = Arc::clone(&shared_cache);
     std::thread::spawn(move || {
         while let Some(req) = db_rx.blocking_recv() {
-            if let Some(new_cache) = repo.handle_request(req) {
-                worker_cache.store(Arc::new(new_cache));
+            match repo.handle_request(req) {
+                Some(new_cache) => {
+                    worker_cache.store(Arc::new(new_cache));
+                }
+                None => {}
             }
         }
     });
@@ -95,11 +98,10 @@ where
             };
         }
 
-
         terminal.draw(|f| {
             ui::render(app, &app.db_cache, f);
         })?;
-        
+
         let timeout = tick_rate.saturating_sub(last_tick.elapsed());
         if event::poll(timeout)? {
             let ev = event::read()?;

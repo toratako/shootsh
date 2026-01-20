@@ -19,7 +19,7 @@ async fn main() -> Result<()> {
     let repo = Repository::new(conn).context("Failed to init repo")?;
 
     let shared_cache = Arc::new(arc_swap::ArcSwap::from_pointee(repo.get_current_cache()));
-    
+
     let (db_tx, db_rx) = mpsc::channel::<DbRequest>(100);
     spawn_db_worker(repo, Arc::clone(&shared_cache), db_rx);
 
@@ -65,8 +65,11 @@ fn spawn_db_worker(
 ) {
     std::thread::spawn(move || {
         while let Some(req) = rx.blocking_recv() {
-            if let Some(new_cache) = repo.handle_request(req) {
-                cache.store(Arc::new(new_cache));
+            match repo.handle_request(req) {
+                Some(new_cache) => {
+                    cache.store(Arc::new(new_cache));
+                }
+                None => {}
             }
         }
     });

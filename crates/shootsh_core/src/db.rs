@@ -60,11 +60,12 @@ impl Repository {
                 fingerprint,
                 reply_tx,
             } => {
-                let user_context = self
-                    .get_or_create_user_context(&fingerprint)
-                    .expect("Critical DB error");
-
-                let _ = reply_tx.send(user_context);
+                match self.get_or_create_user_context(&fingerprint) {
+                    Ok(user_context) => {
+                        let _ = reply_tx.send(user_context);
+                    }
+                    Err(_) => {}
+                }
                 None
             }
             DbRequest::SaveGame {
