@@ -1,5 +1,6 @@
 use crate::input::InputTransformer;
 use arc_swap::ArcSwap;
+use crossterm::style::{Color, Stylize};
 use ratatui::{Terminal, TerminalOptions, Viewport, backend::CrosstermBackend, layout::Rect};
 use russh::keys::ssh_key::PublicKey;
 use russh::server::{Auth, Handler, Msg, Session};
@@ -245,6 +246,14 @@ impl ClientHandler {
 impl Handler for ClientHandler {
     type Error = russh::Error;
 
+    async fn auth_none(&mut self, _user: &str) -> std::result::Result<Auth, Self::Error> {
+        Ok(Auth::Accept)
+    }
+
+    async fn auth_password(&mut self, _user: &str, _pass: &str) -> Result<Auth, Self::Error> {
+        Ok(Auth::Accept)
+    }
+
     async fn auth_publickey(&mut self, _user: &str, key: &PublicKey) -> Result<Auth, Self::Error> {
         let fp = key
             .fingerprint(russh::keys::ssh_key::HashAlg::Sha256)
@@ -307,7 +316,26 @@ impl Handler for ClientHandler {
         channel: ChannelId,
         session: &mut Session,
     ) -> std::result::Result<(), Self::Error> {
-        let fp = self.fingerprint.clone().expect("Should be authenticated");
+        let fp = match self.fingerprint.clone() {
+            Some(fp) => fp,
+            None => {
+                let error_header = "Error: Public key authentication is required."
+                    .with(Color::Red)
+                    .bold();
+                let command_hint = "ssh-keygen -t ed25519".with(Color::Cyan);
+
+                let msg = format!(
+                    "\r\n{}\r\n\
+                    Please generate a key using: {}\r\n\r\n",
+                    error_header, command_hint
+                );
+
+                let _ = session.data(channel, msg.into());
+                let _ = session.channel_success(channel);
+                let _ = session.close(channel);
+                return Ok(());
+            }
+        };
 
         self.kick_existing_session(&fp, channel, session.handle())
             .await;
