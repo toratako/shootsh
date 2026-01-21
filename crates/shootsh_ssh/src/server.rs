@@ -246,10 +246,6 @@ impl ClientHandler {
 impl Handler for ClientHandler {
     type Error = russh::Error;
 
-    async fn auth_none(&mut self, _user: &str) -> std::result::Result<Auth, Self::Error> {
-        Ok(Auth::Accept)
-    }
-
     async fn auth_password(&mut self, _user: &str, _pass: &str) -> Result<Auth, Self::Error> {
         Ok(Auth::Accept)
     }
