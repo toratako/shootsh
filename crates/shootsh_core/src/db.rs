@@ -322,6 +322,14 @@ fn setup_schema(conn: &Connection) -> Result<()> {
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS daily_activity (
+            user_id INTEGER,
+            date DATE DEFAULT (DATE('now')),
+            count INTEGER DEFAULT 0,
+            PRIMARY KEY (user_id, date),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
         CREATE INDEX IF NOT EXISTS idx_stats_daily ON user_stats (daily_high_score_at, daily_high_score DESC);
         CREATE INDEX IF NOT EXISTS idx_stats_weekly ON user_stats (weekly_high_score_at, weekly_high_score DESC);
         CREATE INDEX IF NOT EXISTS idx_stats_high_score ON user_stats (high_score DESC);",
