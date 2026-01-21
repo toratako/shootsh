@@ -89,7 +89,7 @@ impl App {
             Action::Quit => self.should_quit = true,
             Action::Tick => self.handle_tick()?,
             Action::MouseMove(x, y) => self.handle_mouse_move(x, y),
-            Action::MouseClick(x, y) => self.handle_hit(x, y)?,
+            Action::MouseClick(x, y) => self.handle_click(x, y)?,
             Action::InputChar(c) => self.handle_input_char(c),
             Action::DeleteChar => self.handle_delete_char(),
             Action::SubmitName => self.handle_submit_name(),
@@ -146,11 +146,13 @@ impl App {
         }
 
         if let Scene::Playing(state) = &mut self.scene {
+            // end game
             if state.scene_start.elapsed() >= Duration::from_secs(PLAYING_TIME_SEC.into()) {
                 let stats = state.combat_stats.clone();
                 return self.end_game(stats);
             }
 
+            // respawn target
             if state
                 .target
                 .is_expired(state.last_target_spawn.elapsed(), &state.combat_stats)
@@ -175,7 +177,7 @@ impl App {
         }
     }
 
-    fn handle_hit(&mut self, x: u16, y: u16) -> Result<()> {
+    fn handle_click(&mut self, x: u16, y: u16) -> Result<()> {
         match &mut self.scene {
             Scene::Menu => self.start_game(),
             Scene::Playing(state) => {
@@ -222,8 +224,11 @@ impl App {
                 }
             }
             Scene::Playing(_) if c == 'r' => self.start_game(),
-            _ if c == 'q' => self.should_quit = true,
-            _ => {}
+            _ => {
+                if c == 'q' {
+                    self.should_quit = true;
+                }
+            }
         }
     }
 

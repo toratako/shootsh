@@ -7,6 +7,7 @@ use crossterm::{
 };
 use ratatui::prelude::*;
 use rusqlite::Connection;
+use shootsh_core::db::DbCache;
 use shootsh_core::{
     Action, App,
     db::{DbRequest, Repository},
@@ -25,27 +26,15 @@ fn main() -> Result<()> {
     let conn = Connection::open("shootsh.db").context("Failed to open database")?;
     let repo =
         Repository::new(conn, DEFAULT_MAX_USERS).context("Failed to initialize repository")?;
+    let shared_cache = Arc::new(ArcSwap::from_pointee(repo.get_current_cache()));
+    let (db_tx, db_rx) = mpsc::channel::<DbRequest>(100);
 
     let user_context = repo
         .get_or_create_user_context("local")
         .context("Failed to get or create local user")?;
-
-    let (db_tx, mut db_rx) = mpsc::channel::<DbRequest>(100);
-    let shared_cache = Arc::new(ArcSwap::from_pointee(repo.get_current_cache()));
-
-    let worker_cache = Arc::clone(&shared_cache);
-    std::thread::spawn(move || {
-        while let Some(req) = db_rx.blocking_recv() {
-            match repo.handle_request(req) {
-                Some(new_cache) => {
-                    worker_cache.store(Arc::new(new_cache));
-                }
-                None => {}
-            }
-        }
-    });
-
     let mut app = App::new(user_context, db_tx, shared_cache.load_full());
+
+    spawn_db_worker(repo, Arc::clone(&shared_cache), db_rx);
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -156,4 +145,21 @@ fn handle_event(app: &mut App, event: Event) -> Result<()> {
         app.update_state(act)?;
     }
     Ok(())
+}
+
+fn spawn_db_worker(
+    repo: Repository,
+    cache: Arc<ArcSwap<DbCache>>,
+    mut rx: mpsc::Receiver<DbRequest>,
+) {
+    std::thread::spawn(move || {
+        while let Some(req) = rx.blocking_recv() {
+            match repo.handle_request(req) {
+                Some(new_cache) => {
+                    cache.store(Arc::new(new_cache));
+                }
+                None => {}
+            }
+        }
+    });
 }

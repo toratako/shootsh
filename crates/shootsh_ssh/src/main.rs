@@ -20,9 +20,7 @@ const DEFAULT_MAX_USERS: i64 = 100_000;
 async fn main() -> Result<()> {
     let conn = Connection::open("shootsh.db").context("Failed to open DB")?;
     let repo = Repository::new(conn, DEFAULT_MAX_USERS).context("Failed to init repo")?;
-
-    let shared_cache = Arc::new(arc_swap::ArcSwap::from_pointee(repo.get_current_cache()));
-
+    let shared_cache = Arc::new(ArcSwap::from_pointee(repo.get_current_cache()));
     let (db_tx, db_rx) = mpsc::channel::<DbRequest>(100);
     spawn_db_worker(repo, Arc::clone(&shared_cache), db_rx);
 
