@@ -232,14 +232,14 @@ fn render_game_over(
     render_leaderboard(app, cache, f, chunks[1], true);
 }
 
-fn render_leaderboard(_app: &App, cache: &DbCache, f: &mut Frame, area: Rect, _is_game_over: bool) {
+fn render_leaderboard(app: &App, cache: &DbCache, f: &mut Frame, area: Rect, _is_game_over: bool) {
     let rows: Vec<Row> = cache
-        .top_scores
+        .all_time_scores
         .iter()
         .enumerate()
         .map(|(i, entry)| {
             let pos = i + 1;
-            let is_own_entry = false; //is_game_over && entry.name == app.player_name;
+            let is_own_entry = entry.name == app.user.name;
             let style = if is_own_entry {
                 Style::default().bg(Color::DarkGray)
             } else {

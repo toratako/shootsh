@@ -18,7 +18,16 @@ pub struct ScoreEntry {
 
 #[derive(Debug, Clone, Default)]
 pub struct DbCache {
-    pub top_scores: Vec<ScoreEntry>,
+    pub daily_scores: Vec<ScoreEntry>,
+    pub weekly_scores: Vec<ScoreEntry>,
+    pub all_time_scores: Vec<ScoreEntry>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum RankingPeriod {
+    Daily,
+    Weekly,
+    AllTime,
 }
 
 pub struct Repository {
@@ -51,7 +60,15 @@ impl Repository {
 
     pub fn get_current_cache(&self) -> DbCache {
         DbCache {
-            top_scores: self.get_top_scores(10).unwrap_or_default(),
+            daily_scores: self
+                .get_top_scores(RankingPeriod::Daily, 10)
+                .unwrap_or_default(),
+            weekly_scores: self
+                .get_top_scores(RankingPeriod::Weekly, 10)
+                .unwrap_or_default(),
+            all_time_scores: self
+                .get_top_scores(RankingPeriod::AllTime, 10)
+                .unwrap_or_default(),
         }
     }
 
@@ -94,40 +111,85 @@ impl Repository {
     pub fn save_game(&self, user_id: i64, score: u32, hits: u32, misses: u32) -> Result<()> {
         self.conn.execute(
             "INSERT INTO user_stats (
-            user_id, 
-            high_score, 
-            total_hits, 
-            total_misses, 
-            sessions, 
-            high_score_at
-        )
-        VALUES (?1, ?2, ?3, ?4, 1, DATETIME('now'))
-        ON CONFLICT(user_id) DO UPDATE SET
-            high_score_at = CASE 
-                WHEN ?2 > high_score THEN DATETIME('now') 
-                ELSE high_score_at 
-            END,
-            high_score = MAX(high_score, ?2),
-            total_hits = total_hits + ?3,
-            total_misses = total_misses + ?4,
-            sessions = sessions + 1",
+                user_id, 
+                high_score, 
+                high_score_at,
+                daily_high_score,
+                daily_high_score_at,
+                weekly_high_score,
+                weekly_high_score_at,
+                total_hits, 
+                total_misses, 
+                sessions
+            )
+            VALUES (?1, ?2, DATETIME('now'), ?2, DATE('now'), ?2, strftime('%Y-%W', 'now'), ?3, ?4, 1)
+            ON CONFLICT(user_id) DO UPDATE SET
+                -- all time
+                high_score_at = CASE 
+                    WHEN ?2 > high_score THEN DATETIME('now') 
+                    ELSE high_score_at 
+                END,
+                high_score = MAX(high_score, ?2),
+
+                -- daily.
+                daily_high_score = CASE 
+                    WHEN daily_high_score_at != DATE('now') THEN ?2
+                    ELSE MAX(daily_high_score, ?2)
+                END,
+                daily_high_score_at = DATE('now'),
+
+                -- weekly
+                weekly_high_score = CASE 
+                    WHEN weekly_high_score_at != strftime('%Y-%W', 'now') THEN ?2
+                    ELSE MAX(weekly_high_score, ?2)
+                END,
+                weekly_high_score_at = strftime('%Y-%W', 'now'),
+
+                total_hits = total_hits + ?3,
+                total_misses = total_misses + ?4,
+                sessions = sessions + 1",
             params![user_id, score, hits, misses],
         )?;
         Ok(())
     }
 
-    pub fn get_top_scores(&self, limit: u32) -> Result<Vec<ScoreEntry>> {
-        let mut stmt = self.conn.prepare_cached(
+    pub fn get_top_scores(&self, period: RankingPeriod, limit: u32) -> Result<Vec<ScoreEntry>> {
+        let (score_col, date_col, date_val, date_format) = match period {
+            RankingPeriod::Daily => (
+                "daily_high_score",
+                "daily_high_score_at",
+                "date('now')",
+                "%m-%d %H:%M",
+            ),
+            RankingPeriod::Weekly => (
+                "weekly_high_score",
+                "weekly_high_score_at",
+                "strftime('%Y-%W', 'now')",
+                "%m-%d %H:%M",
+            ),
+            RankingPeriod::AllTime => ("high_score", "high_score_at", "NULL", "%Y-%m-%d"),
+        };
+
+        let where_clause = if let RankingPeriod::AllTime = period {
+            format!("WHERE {} > 0", score_col)
+        } else {
+            format!("WHERE {} > 0 AND {} = {}", score_col, date_col, date_val)
+        };
+
+        let query = format!(
             "SELECT 
             u.username, 
-            s.high_score, 
-            strftime('%m-%d %H:%M', s.high_score_at)
+            s.{}, 
+            strftime('{}', s.high_score_at)
          FROM users u
          JOIN user_stats s ON u.id = s.user_id
-         WHERE s.high_score > 0
-         ORDER BY s.high_score DESC, s.high_score_at ASC
+         {}
+         ORDER BY s.{} DESC
          LIMIT ?1",
-        )?;
+            score_col, date_format, where_clause, score_col
+        );
+
+        let mut stmt = self.conn.prepare_cached(&query)?;
 
         let entries = stmt
             .query_map(params![limit], |row| {
@@ -231,7 +293,7 @@ impl Repository {
 }
 
 fn setup_schema(conn: &Connection) -> Result<()> {
-    conn.pragma_update(None, "journal_mode", &"WAL")?;
+    // conn.pragma_update(None, "journal_mode", &"WAL")?;
 
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS users (
@@ -243,22 +305,25 @@ fn setup_schema(conn: &Connection) -> Result<()> {
 
         CREATE TABLE IF NOT EXISTS user_stats (
             user_id INTEGER PRIMARY KEY,
+
             high_score INTEGER DEFAULT 0,
+            high_score_at DATETIME DEFAULT (DATETIME('now')),
+
+            daily_high_score INTEGER DEFAULT 0,
+            daily_high_score_at DATE DEFAULT (DATE('now')),
+
+            weekly_high_score INTEGER DEFAULT 0,
+            weekly_high_score_at TEXT DEFAULT (strftime('%Y-%W', 'now')),
+
             total_hits INTEGER DEFAULT 0,
             total_misses INTEGER DEFAULT 0,
             sessions INTEGER DEFAULT 0,
-            high_score_at DATETIME DEFAULT (DATETIME('now')),
+
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
 
-        CREATE TABLE IF NOT EXISTS daily_activity (
-            user_id INTEGER,
-            date DATE DEFAULT (DATE('now')),
-            count INTEGER DEFAULT 0,
-            PRIMARY KEY (user_id, date),
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-        );
-
+        CREATE INDEX IF NOT EXISTS idx_stats_daily ON user_stats (daily_high_score_at, daily_high_score DESC);
+        CREATE INDEX IF NOT EXISTS idx_stats_weekly ON user_stats (weekly_high_score_at, weekly_high_score DESC);
         CREATE INDEX IF NOT EXISTS idx_stats_high_score ON user_stats (high_score DESC);",
     )?;
     Ok(())
