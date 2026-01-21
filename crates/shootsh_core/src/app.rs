@@ -124,9 +124,24 @@ impl App {
             misses: stats.miss_count,
         });
 
+        // update high score
         let is_new_record = final_score > self.user.high_score;
         if is_new_record {
             self.user.high_score = final_score;
+        }
+
+        // update activity
+        let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+        if let Some(day) = self.user.user_activity.iter_mut().find(|d| d.date == today) {
+            day.count += 1;
+        } else {
+            self.user.user_activity.insert(
+                0,
+                crate::db::ActivityDay {
+                    date: today,
+                    count: 1,
+                },
+            );
         }
 
         self.change_scene(Scene::GameOver {

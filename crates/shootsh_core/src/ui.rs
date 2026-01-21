@@ -1,13 +1,16 @@
 use crate::app::{App, PlayingState, Scene};
 use crate::db::DbCache;
+use chrono::{Datelike, Utc};
 use ratatui::{prelude::*, widgets::*};
 use std::time::Duration;
-
 const LOGO: &str = include_str!("./logo.txt");
 pub const MIN_WIDTH: u16 = 80;
 pub const MIN_HEIGHT: u16 = 24;
 const TABLE_WIDTH: u16 = 50;
 const NAMING_INPUT_WIDTH: u16 = 40;
+
+const DAYS_IN_WEEK: u16 = 7;
+const WEEKS_TO_DISPLAY: u16 = 7;
 
 pub fn render(app: &App, cache: &DbCache, f: &mut Frame) {
     let area = f.area();
@@ -148,12 +151,14 @@ fn render_menu(app: &App, cache: &DbCache, f: &mut Frame, area: Rect) {
         .direction(Direction::Vertical)
         .margin(2)
         .constraints([
-            Constraint::Length(10),
-            Constraint::Length(4),
-            Constraint::Min(0),
+            Constraint::Length(10), // logo
+            Constraint::Length(9),  // activity
+            Constraint::Length(4),  // message
+            Constraint::Min(0),     // leaderboard
         ])
         .split(area);
 
+    // logo
     f.render_widget(
         Paragraph::new(LOGO)
             .alignment(Alignment::Center)
@@ -162,15 +167,20 @@ fn render_menu(app: &App, cache: &DbCache, f: &mut Frame, area: Rect) {
         chunks[0],
     );
 
+    // activity
+    render_activity_graph(app, f, chunks[1]);
+
     let mut lines = vec![Line::from("!!! CLICK TO START !!!").bold().slow_blink()];
     if app.user.high_score > 0 {
         lines.push(Line::from(format!("SESSION BEST: {}", app.user.high_score)).cyan());
     }
     f.render_widget(
         Paragraph::new(lines).alignment(Alignment::Center),
-        chunks[1],
+        chunks[2],
     );
-    render_leaderboard(app, cache, f, chunks[2], false);
+
+    // leaderboard
+    render_leaderboard(app, cache, f, chunks[3], false);
 }
 
 fn render_playing(state: &PlayingState, f: &mut Frame, area: Rect) {
@@ -285,6 +295,79 @@ fn render_leaderboard(app: &App, cache: &DbCache, f: &mut Frame, area: Rect, _is
     );
 
     f.render_widget(table, centered_rect(TABLE_WIDTH, area.height, area));
+}
+
+fn render_activity_graph(app: &App, f: &mut Frame, area: Rect) {
+    let title = " ACTIVITY ";
+    let label_width = 2; // "S ", "M ", ...
+    let today = Utc::now().date_naive();
+    let days_from_sunday = today.weekday().num_days_from_sunday() as i64;
+    let total_days_to_show = WEEKS_TO_DISPLAY as i64 * 7;
+    let start_date = today - chrono::Duration::days(days_from_sunday + (total_days_to_show - 7));
+
+    let labels = ["S", "M", "T", "W", "T", "F", "S"];
+    let mut lines = Vec::new();
+
+    for day_offset in 0..DAYS_IN_WEEK {
+        let mut line_spans = Vec::new();
+
+        // S, M, T...
+        line_spans.push(Span::styled(
+            format!("{} ", labels[day_offset as usize]),
+            Style::default().dark_gray(),
+        ));
+
+        for week in 0..WEEKS_TO_DISPLAY {
+            let current_date =
+                start_date + chrono::Duration::days((week as i64 * 7) + day_offset as i64);
+
+            let color = if current_date > today {
+                Color::Reset
+            } else {
+                let date_str = current_date.format("%Y-%m-%d").to_string();
+                let activity_count = app
+                    .user
+                    .user_activity
+                    .iter()
+                    .find(|a| a.date == date_str)
+                    .map(|a| a.count)
+                    .unwrap_or(0);
+
+                match activity_count {
+                    0 => Color::Indexed(235),
+                    1..=2 => Color::DarkGray,
+                    3..=5 => Color::Green,
+                    6..=9 => Color::LightGreen,
+                    _ => Color::White,
+                }
+            };
+
+            line_spans.push(Span::styled("  ", Style::default().bg(color)));
+            if week < WEEKS_TO_DISPLAY - 1 {
+                line_spans.push(Span::raw(" "));
+            }
+        }
+        lines.push(Line::from(line_spans));
+    }
+
+    // 3 = [[SPACE][SPACE](cell)][SPACE(margin)] + 2(margin)
+    let content_width = label_width + (WEEKS_TO_DISPLAY * 3).saturating_sub(1) + 2;
+
+    // 2 = border
+    let widget_width = std::cmp::max(content_width, title.len() as u16) + 2;
+    let centered_area = centered_rect(widget_width, 9, area);
+
+    f.render_widget(
+        Paragraph::new(lines)
+            .block(
+                Block::default()
+                    .title(title)
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Plain),
+            )
+            .alignment(Alignment::Center),
+        centered_area,
+    );
 }
 
 fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {

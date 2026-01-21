@@ -2,11 +2,18 @@ use anyhow::Result;
 use rusqlite::{Connection, params};
 
 #[derive(Debug, Clone)]
+pub struct ActivityDay {
+    pub date: String,
+    pub count: u32,
+}
+
+#[derive(Debug, Clone)]
 pub struct UserContext {
     pub id: i64,
     pub fingerprint: String,
     pub name: String,
     pub high_score: u32,
+    pub user_activity: Vec<ActivityDay>,
 }
 
 #[derive(Debug, Clone)]
@@ -150,6 +157,15 @@ impl Repository {
                 sessions = sessions + 1",
             params![user_id, score, hits, misses],
         )?;
+
+        self.conn.execute(
+            "INSERT INTO daily_activity (user_id, date, count)
+            VALUES (?1, DATE('now'), 1)
+            ON CONFLICT(user_id, date) DO UPDATE SET
+                count = count + 1",
+            params![user_id],
+        )?;
+
         Ok(())
     }
 
@@ -181,11 +197,11 @@ impl Repository {
             u.username, 
             s.{}, 
             strftime('{}', s.high_score_at)
-         FROM users u
-         JOIN user_stats s ON u.id = s.user_id
-         {}
-         ORDER BY s.{} DESC
-         LIMIT ?1",
+            FROM users u
+            JOIN user_stats s ON u.id = s.user_id
+            {}
+            ORDER BY s.{} DESC
+            LIMIT ?1",
             score_col, date_format, where_clause, score_col
         );
 
@@ -202,6 +218,27 @@ impl Repository {
             .collect::<std::result::Result<Vec<_>, rusqlite::Error>>()?;
 
         Ok(entries)
+    }
+
+    pub fn get_user_activity(&self, user_id: i64, days_limit: u32) -> Vec<ActivityDay> {
+        let mut stmt = self
+            .conn
+            .prepare_cached(
+                "SELECT date, count FROM daily_activity 
+                WHERE user_id = ?1 AND date > DATE('now', '-' || ?2 || ' days')
+                ORDER BY date ASC",
+            )
+            .expect("Failed to prepare activity query");
+
+        stmt.query_map(params![user_id, days_limit], |row| {
+            Ok(ActivityDay {
+                date: row.get(0)?,
+                count: row.get(1)?,
+            })
+        })
+        .expect("Query failed")
+        .filter_map(|r| r.ok())
+        .collect()
     }
 
     pub fn get_user_by_fingerprint(&self, fingerprint: &str) -> Result<Option<(i64, String)>> {
@@ -236,17 +273,21 @@ impl Repository {
     pub fn get_or_create_user_context(&self, fingerprint: &str) -> Result<UserContext> {
         let mut stmt = self.conn.prepare_cached(
             "SELECT u.id, u.username, IFNULL(s.high_score, 0) 
-         FROM users u 
-         LEFT JOIN user_stats s ON u.id = s.user_id 
-         WHERE u.fingerprint = ?1",
+            FROM users u 
+            LEFT JOIN user_stats s ON u.id = s.user_id 
+            WHERE u.fingerprint = ?1",
         )?;
 
         let res = stmt.query_row(params![fingerprint], |row| {
+            let id: i64 = row.get(0)?;
+            let user_activity = self.get_user_activity(id, 30);
+
             Ok(UserContext {
-                id: row.get(0)?,
+                id,
                 fingerprint: fingerprint.to_string(),
                 name: row.get(1)?,
                 high_score: row.get(2)?,
+                user_activity,
             })
         });
 
@@ -260,6 +301,7 @@ impl Repository {
                     fingerprint: fingerprint.to_string(),
                     name: "NewPlayer".to_string(),
                     high_score: 0,
+                    user_activity: Vec::new(),
                 })
             }
             Err(e) => Err(e.into()),
@@ -274,13 +316,13 @@ impl Repository {
         if count >= self.max_users {
             let deleted = self.conn.execute(
                 "DELETE FROM users 
-             WHERE id IN (
-                SELECT u.id FROM users u
-                LEFT JOIN user_stats s ON u.id = s.user_id
-                WHERE IFNULL(s.high_score, 0) = 0
-                ORDER BY u.created_at ASC
-                LIMIT 1
-             )",
+                WHERE id IN (
+                    SELECT u.id FROM users u
+                    LEFT JOIN user_stats s ON u.id = s.user_id
+                    WHERE IFNULL(s.high_score, 0) = 0
+                    ORDER BY u.created_at ASC
+                    LIMIT 1
+                )",
                 [],
             )?;
 
