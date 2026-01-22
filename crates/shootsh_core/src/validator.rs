@@ -9,7 +9,7 @@ pub struct AntiCheatConfig {
 impl Default for AntiCheatConfig {
     fn default() -> Self {
         Self {
-            min_reaction_time: Duration::from_millis(150),
+            min_reaction_time: Duration::from_millis(100),
             max_pixels_per_ms: 6.0,
         }
     }
