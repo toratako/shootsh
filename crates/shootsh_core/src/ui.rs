@@ -10,7 +10,7 @@ const TABLE_WIDTH: u16 = 50;
 const NAMING_INPUT_WIDTH: u16 = 40;
 
 const DAYS_IN_WEEK: u16 = 7;
-const WEEKS_TO_DISPLAY: u16 = 7;
+const WEEKS_TO_DISPLAY: u16 = 15;
 
 pub fn render(app: &App, cache: &DbCache, f: &mut Frame) {
     let area = f.area();
@@ -54,20 +54,18 @@ fn render_warning(app: &App, f: &mut Frame, area: Rect) {
         f.render_widget(text, warning_area);
     }
 }
-
 fn render_cursor(app: &App, f: &mut Frame) {
     let area = f.area();
 
-    let mut cursor_color = Color::LightGreen;
+    let mut style = Style::default().fg(Color::LightGreen);
 
     if let Scene::Playing(state) = &app.scene {
         if state.target.is_hit(app.mouse_pos.x, app.mouse_pos.y) {
-            cursor_color = Color::Yellow;
+            style = style.fg(Color::Yellow).add_modifier(Modifier::BOLD);
         }
     }
 
     let cursor_lines = vec!["  v  ", "- + -", "  ^  "];
-
     let cursor_height = cursor_lines.len() as u16;
     let cursor_width = cursor_lines.iter().map(|s| s.len()).max().unwrap_or(0) as u16;
 
@@ -82,7 +80,7 @@ fn render_cursor(app: &App, f: &mut Frame) {
             if x >= 0 && x < area.width as i32 && y >= 0 && y < area.height as i32 {
                 if ch != ' ' {
                     f.render_widget(
-                        Span::styled(ch.to_string(), Style::default().fg(cursor_color)),
+                        Span::styled(ch.to_string(), style),
                         Rect::new(x as u16, y as u16, 1, 1),
                     );
                 }
@@ -298,7 +296,7 @@ fn render_leaderboard(app: &App, cache: &DbCache, f: &mut Frame, area: Rect, _is
 }
 
 fn render_activity_graph(app: &App, f: &mut Frame, area: Rect) {
-    let title = " ACTIVITY ";
+    let title = format!(" ACTIVITY ({}weeks) ", WEEKS_TO_DISPLAY);
     let label_width = 2; // "S ", "M ", ...
     let today = Utc::now().date_naive();
     let days_from_sunday = today.weekday().num_days_from_sunday() as i64;
