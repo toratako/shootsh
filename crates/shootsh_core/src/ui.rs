@@ -35,7 +35,7 @@ pub fn render(app: &App, cache: &DbCache, f: &mut Frame) {
 
 fn render_warning(app: &App, f: &mut Frame, area: Rect) {
     if let Some(_) = app.last_cheat_warning {
-        let warning_area = centered_rect(45, 5, area);
+        let warning_area = absolute_centered_rect(45, 5, area);
 
         f.render_widget(Clear, warning_area);
 
@@ -113,7 +113,7 @@ fn render_naming(_app: &App, input_buffer: &str, f: &mut Frame, area: Rect) {
         .margin(5)
         .split(area);
 
-    let input_area = centered_rect(NAMING_INPUT_WIDTH, 3, chunks[1]);
+    let input_area = absolute_centered_rect(NAMING_INPUT_WIDTH, 3, chunks[1]);
 
     f.render_widget(
         Paragraph::new("WELCOME TO SHOOT.SH")
@@ -127,7 +127,6 @@ fn render_naming(_app: &App, input_buffer: &str, f: &mut Frame, area: Rect) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
                 .title(" ENTER YOUR NAME ")
                 .title_alignment(Alignment::Center),
         )
@@ -149,10 +148,10 @@ fn render_menu(app: &App, cache: &DbCache, f: &mut Frame, area: Rect) {
         .direction(Direction::Vertical)
         .margin(2)
         .constraints([
-            Constraint::Length(10), // logo
-            Constraint::Length(9),  // activity
-            Constraint::Length(4),  // message
-            Constraint::Min(0),     // leaderboard
+            Constraint::Length(7), // logo
+            Constraint::Length(9), // activity
+            Constraint::Length(4), // message
+            Constraint::Min(0),    // leaderboard
         ])
         .split(area);
 
@@ -170,7 +169,7 @@ fn render_menu(app: &App, cache: &DbCache, f: &mut Frame, area: Rect) {
 
     let mut lines = vec![Line::from("!!! CLICK TO START !!!").bold().slow_blink()];
     if app.user.high_score > 0 {
-        lines.push(Line::from(format!("SESSION BEST: {}", app.user.high_score)).cyan());
+        lines.push(Line::from(format!("HIGH SCORE: {}", app.user.high_score)).cyan());
     }
     f.render_widget(
         Paragraph::new(lines).alignment(Alignment::Center),
@@ -229,7 +228,7 @@ fn render_game_over(
     let msg = vec![
         Line::from(format!("FINAL SCORE: {}", score).bold().green()),
         Line::from(if is_new_record {
-            "!!! NEW SESSION BEST !!!"
+            "!!! NEW HIGH SCORE !!!"
         } else {
             "TRY AGAIN!"
         })
@@ -288,11 +287,13 @@ fn render_leaderboard(app: &App, cache: &DbCache, f: &mut Frame, area: Rect, _is
     .block(
         Block::default()
             .title(" GLOBAL RANKING ")
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded),
+            .borders(Borders::ALL),
     );
 
-    f.render_widget(table, centered_rect(TABLE_WIDTH, area.height, area));
+    f.render_widget(
+        table,
+        horizontal_centered_rect(TABLE_WIDTH, area.height, area),
+    );
 }
 
 fn render_activity_graph(app: &App, f: &mut Frame, area: Rect) {
@@ -364,7 +365,7 @@ fn render_activity_graph(app: &App, f: &mut Frame, area: Rect) {
 
     // 2 = border
     let widget_width = std::cmp::max(content_width, title.len() as u16) + 2;
-    let centered_area = centered_rect(widget_width, 9, area);
+    let centered_area = horizontal_centered_rect(widget_width, 9, area);
 
     f.render_widget(
         Paragraph::new(lines)
@@ -379,10 +380,21 @@ fn render_activity_graph(app: &App, f: &mut Frame, area: Rect) {
     );
 }
 
-fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
+fn horizontal_centered_rect(width: u16, height: u16, area: Rect) -> Rect {
     Rect::new(
         area.x + area.width.saturating_sub(width) / 2,
         area.y,
+        width.min(area.width),
+        height.min(area.height),
+    )
+}
+
+fn absolute_centered_rect(width: u16, height: u16, area: Rect) -> Rect {
+    let center_y = area.y + area.height.saturating_sub(height) / 2;
+    let center_x = area.x + area.width.saturating_sub(width) / 2;
+    Rect::new(
+        center_x,
+        center_y,
         width.min(area.width),
         height.min(area.height),
     )
