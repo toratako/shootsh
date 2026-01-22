@@ -319,18 +319,26 @@ fn render_activity_graph(app: &App, f: &mut Frame, area: Rect) {
             let current_date =
                 start_date + chrono::Duration::days((week as i64 * 7) + day_offset as i64);
 
+            let date_str = current_date.format("%Y-%m-%d").to_string();
+            let activity_count = app
+                .user
+                .user_activity
+                .iter()
+                .find(|a| a.date == date_str)
+                .map(|a| a.count)
+                .unwrap_or(0);
+
+            let display_text = if current_date > today {
+                "  ".to_string()
+            } else if activity_count == 0 {
+                "  ".to_string()
+            } else {
+                format!("{:02}", activity_count % 100)
+            };
+
             let color = if current_date > today {
                 Color::Reset
             } else {
-                let date_str = current_date.format("%Y-%m-%d").to_string();
-                let activity_count = app
-                    .user
-                    .user_activity
-                    .iter()
-                    .find(|a| a.date == date_str)
-                    .map(|a| a.count)
-                    .unwrap_or(0);
-
                 match activity_count {
                     0 => Color::Indexed(235),
                     1..=2 => Color::DarkGray,
@@ -340,7 +348,10 @@ fn render_activity_graph(app: &App, f: &mut Frame, area: Rect) {
                 }
             };
 
-            line_spans.push(Span::styled("  ", Style::default().bg(color)));
+            line_spans.push(Span::styled(
+                display_text,
+                Style::default().fg(Color::Black).bg(color),
+            ));
             if week < WEEKS_TO_DISPLAY - 1 {
                 line_spans.push(Span::raw(" "));
             }
