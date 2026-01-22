@@ -14,7 +14,29 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::mpsc;
 
-const CLEANUP_SEQ: &[u8] = b"\x1b[?1003l\x1b[?1006l\x1b[?1049l\x1b[?25h";
+const SETUP_SEQ: &[u8] = concat!(
+    "\x1b[?1049h", // EnterAlternateScreen
+    "\x1b[?1000h", // EnableMouseCapture (Normal)
+    "\x1b[?1002h", // EnableMouseCapture (Button)
+    "\x1b[?1003h", // EnableMouseCapture (Any)
+    "\x1b[?1015h", // EnableMouseCapture (URXVT)
+    "\x1b[?1006h", // EnableMouseCapture (SGR)
+    "\x1b[?25l"    // HideCursor
+)
+.as_bytes();
+
+const CLEANUP_SEQ: &[u8] = concat!(
+    "\x1b[?1006l", // DisableMouseCapture (SGR)
+    "\x1b[?1015l", // DisableMouseCapture (URXVT)
+    "\x1b[?1003l", // DisableMouseCapture (Any)
+    "\x1b[?1002l", // DisableMouseCapture (Button)
+    "\x1b[?1000l", // DisableMouseCapture (Normal)
+    "\x1b[?1049l", // LeaveAlternateScreen
+    "\x1b[?25h"    // ShowCursor
+)
+.as_bytes();
+
+const CURSOR_HIDE: &[u8] = b"\x1b[?25l";
 
 /// A thread-safe wrapper around a byte buffer to capture TUI draw calls.
 #[derive(Clone, Default)]
@@ -101,7 +123,7 @@ impl ClientHandler {
             })
             .expect("Failed to draw frame");
 
-        let mut output = Vec::from(b"\x1b[?25l");
+        let mut output = Vec::from(CURSOR_HIDE);
         let mut internal_vec = shared_output.0.lock().unwrap();
         output.extend(std::mem::take(&mut *internal_vec));
 
@@ -347,7 +369,7 @@ impl Handler for ClientHandler {
         self.app = Some(app_arc.clone());
 
         let _ = session.channel_success(channel);
-        let _ = session.data(channel, "\x1b[?1049h\x1b[?1003h\x1b[?1006h\x1b[?25l".into());
+        let _ = session.data(channel, SETUP_SEQ.into());
 
         self.run_render_loop(channel, session.handle(), app_arc);
 
