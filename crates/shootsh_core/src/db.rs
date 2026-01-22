@@ -11,7 +11,7 @@ pub struct ActivityDay {
 pub struct UserContext {
     pub id: i64,
     pub fingerprint: String,
-    pub name: String,
+    pub name: Option<String>,
     pub high_score: u32,
     pub user_activity: Vec<ActivityDay>,
 }
@@ -52,6 +52,7 @@ pub enum DbRequest {
     UpdateUsername {
         user_id: i64,
         new_name: String,
+        reply_tx: tokio::sync::oneshot::Sender<Result<(), String>>,
     },
     GetOrCreateUser {
         fingerprint: String,
@@ -105,13 +106,25 @@ impl Repository {
                     None
                 }
             }
-            DbRequest::UpdateUsername { user_id, new_name } => {
-                if self.update_username(user_id, &new_name).is_ok() {
+            DbRequest::UpdateUsername {
+                user_id,
+                new_name,
+                reply_tx,
+            } => match self.update_username(user_id, &new_name) {
+                Ok(_) => {
+                    let _ = reply_tx.send(Ok(()));
                     Some(self.get_current_cache())
-                } else {
+                }
+                Err(e) => {
+                    let msg = if e.to_string().contains("UNIQUE") {
+                        "Username already taken".into()
+                    } else {
+                        "Database error".into()
+                    };
+                    let _ = reply_tx.send(Err(msg));
                     None
                 }
-            }
+            },
         }
     }
 
@@ -254,10 +267,10 @@ impl Repository {
         }
     }
 
-    pub fn create_user(&self, fingerprint: &str, initial_name: &str) -> Result<i64> {
+    pub fn create_user(&self, fingerprint: &str) -> Result<i64> {
         self.conn.execute(
-            "INSERT INTO users (fingerprint, username) VALUES (?1, ?2)",
-            params![fingerprint, initial_name],
+            "INSERT INTO users (fingerprint) VALUES (?1)",
+            params![fingerprint],
         )?;
         Ok(self.conn.last_insert_rowid())
     }
@@ -295,11 +308,11 @@ impl Repository {
             Ok(ctx) => Ok(ctx),
             Err(rusqlite::Error::QueryReturnedNoRows) => {
                 self.enforce_user_limit()?;
-                let id = self.create_user(fingerprint, "NewPlayer")?;
+                let id = self.create_user(fingerprint)?;
                 Ok(UserContext {
                     id,
                     fingerprint: fingerprint.to_string(),
-                    name: "NewPlayer".to_string(),
+                    name: None,
                     high_score: 0,
                     user_activity: Vec::new(),
                 })
@@ -341,7 +354,7 @@ fn setup_schema(conn: &Connection) -> Result<()> {
         "CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             fingerprint TEXT UNIQUE NOT NULL,
-            username TEXT UNIQUE NOT NULL,
+            username TEXT UNIQUE,
             created_at DATETIME DEFAULT (DATETIME('now'))
         );
 

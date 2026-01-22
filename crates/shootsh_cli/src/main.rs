@@ -7,6 +7,7 @@ use crossterm::{
 };
 use ratatui::prelude::*;
 use rusqlite::Connection;
+use shootsh_core::Scene;
 use shootsh_core::db::DbCache;
 use shootsh_core::{
     Action, App,
@@ -22,7 +23,8 @@ use tokio::sync::mpsc;
 
 const DEFAULT_MAX_USERS: i64 = 100_000;
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let conn = Connection::open("shootsh.db").context("Failed to open database")?;
     let repo =
         Repository::new(conn, DEFAULT_MAX_USERS).context("Failed to initialize repository")?;
@@ -52,7 +54,7 @@ fn main() -> Result<()> {
     }));
 
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout))?;
-    let res = run_loop(&mut app, &mut terminal, shared_cache);
+    let res = run_loop(&mut app, &mut terminal, shared_cache).await;
 
     execute!(
         terminal.backend_mut(),
@@ -69,7 +71,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn run_loop<B: Backend>(
+async fn run_loop<B: Backend>(
     app: &mut App,
     terminal: &mut Terminal<B>,
     shared_cache: Arc<ArcSwap<shootsh_core::db::DbCache>>,
@@ -103,18 +105,18 @@ where
                     height: h,
                 };
             }
-            handle_event(app, ev)?;
+            handle_event(app, ev).await?;
         }
 
         if last_tick.elapsed() >= tick_rate {
-            app.update_state(Action::Tick)?;
+            app.update_state(Action::Tick).0?;
             last_tick = Instant::now();
         }
     }
     Ok(())
 }
 
-fn handle_event(app: &mut App, event: Event) -> Result<()> {
+async fn handle_event(app: &mut App, event: Event) -> Result<()> {
     let action = match event {
         Event::Key(key) => {
             if key.modifiers.contains(event::KeyModifiers::CONTROL)
@@ -142,7 +144,32 @@ fn handle_event(app: &mut App, event: Event) -> Result<()> {
     };
 
     if let Some(act) = action {
-        app.update_state(act)?;
+        let (res, rx) = app.update_state(act);
+        res.context("Failed to update state")?;
+
+        if let Some(rx) = rx {
+            // for a CLI ver, this is not a matter
+            match rx.await {
+                Ok(Ok(_)) => {
+                    if let Scene::Naming(state) = &app.scene {
+                        app.user.name = Some(state.input.clone());
+                    }
+                    app.change_scene(Scene::Menu);
+                }
+                Ok(Err(e)) => {
+                    if let Scene::Naming(state) = &mut app.scene {
+                        state.error = Some(e);
+                        state.is_loading = false;
+                    }
+                }
+                Err(_) => {
+                    if let Scene::Naming(state) = &mut app.scene {
+                        state.error = Some("Internal communication error".into());
+                        state.is_loading = false;
+                    }
+                }
+            }
+        }
     }
     Ok(())
 }

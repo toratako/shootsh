@@ -5,6 +5,7 @@ use ratatui::{Terminal, TerminalOptions, Viewport, backend::CrosstermBackend, la
 use russh::keys::ssh_key::PublicKey;
 use russh::server::{Auth, Handler, Msg, Session};
 use russh::*;
+use shootsh_core::Scene;
 use shootsh_core::db::{DbCache, DbRequest};
 use shootsh_core::{Action, App, domain, ui};
 use std::collections::HashMap;
@@ -228,7 +229,7 @@ impl ClientHandler {
                     let sz = *ctx.terminal_size.lock().unwrap();
                     app.db_cache = ctx.shared_cache.load_full();
 
-                    app.update_state(Action::Tick).ok();
+                    app.update_state(Action::Tick).0.ok();
 
                     let mut term_guard = ctx.terminal.lock().unwrap();
                     let term = term_guard.get_or_insert_with(|| {
@@ -398,13 +399,50 @@ impl Handler for ClientHandler {
         let actions = self.input_transformer.handle_input(data);
 
         if !actions.is_empty() {
+            let mut pending_workers = Vec::new();
+
             {
                 let mut app = app_arc.lock().unwrap();
                 app.screen_size = *self.terminal_size.lock().unwrap();
+
                 for act in actions {
-                    app.update_state(act).ok();
+                    let (res, rx) = app.update_state(act);
+
+                    if res.is_err() {
+                        continue;
+                    }
+
+                    if let Some(r) = rx {
+                        pending_workers.push(r);
+                    }
                 }
             }
+            for rx in pending_workers {
+                let app_clone = app_arc.clone();
+                let update_tx = self.update_tx.clone();
+
+                tokio::spawn(async move {
+                    if let Ok(result) = rx.await {
+                        let mut app_inner = app_clone.lock().unwrap();
+                        match result {
+                            Ok(_) => {
+                                if let Scene::Naming(state) = &app_inner.scene {
+                                    app_inner.user.name = Some(state.input.clone());
+                                }
+                                app_inner.change_scene(Scene::Menu);
+                            }
+                            Err(e) => {
+                                if let Scene::Naming(state) = &mut app_inner.scene {
+                                    state.error = Some(e);
+                                    state.is_loading = false;
+                                }
+                            }
+                        }
+                        let _ = update_tx.send(());
+                    }
+                });
+            }
+
             let _ = self.update_tx.send(());
         }
 

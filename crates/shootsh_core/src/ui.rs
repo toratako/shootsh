@@ -1,8 +1,9 @@
-use crate::app::{App, PlayingState, Scene};
+use crate::app::{App, NamingState, PlayingState, Scene};
 use crate::db::DbCache;
 use chrono::{Datelike, Utc};
 use ratatui::{prelude::*, widgets::*};
 use std::time::Duration;
+
 const LOGO: &str = include_str!("./logo.txt");
 pub const MIN_WIDTH: u16 = 80;
 pub const MIN_HEIGHT: u16 = 24;
@@ -21,7 +22,7 @@ pub fn render(app: &App, cache: &DbCache, f: &mut Frame) {
     }
 
     match &app.scene {
-        Scene::Naming(input_buffer) => render_naming(app, input_buffer, f, area),
+        Scene::Naming(state) => render_naming(app, state, f, area),
         Scene::Menu => render_menu(app, cache, f, area),
         Scene::Playing(state) => render_playing(state, f, area),
         Scene::GameOver {
@@ -102,12 +103,13 @@ fn render_size_error(f: &mut Frame, area: Rect) {
     );
 }
 
-fn render_naming(_app: &App, input_buffer: &str, f: &mut Frame, area: Rect) {
+fn render_naming(_app: &App, state: &NamingState, f: &mut Frame, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),
             Constraint::Length(3),
+            Constraint::Length(1),
             Constraint::Min(0),
         ])
         .margin(5)
@@ -123,7 +125,13 @@ fn render_naming(_app: &App, input_buffer: &str, f: &mut Frame, area: Rect) {
         chunks[0],
     );
 
-    let input = Paragraph::new(input_buffer)
+    let input_text = if state.is_loading {
+        format!("{} (Saving...)", state.input)
+    } else {
+        state.input.clone()
+    };
+
+    let input = Paragraph::new(input_text.as_str())
         .block(
             Block::default()
                 .borders(Borders::ALL)
@@ -131,15 +139,34 @@ fn render_naming(_app: &App, input_buffer: &str, f: &mut Frame, area: Rect) {
                 .title_alignment(Alignment::Center),
         )
         .alignment(Alignment::Center)
-        .yellow();
+        .style(if state.is_loading {
+            Style::default().fg(Color::DarkGray)
+        } else {
+            Style::default().fg(Color::Yellow)
+        });
 
     f.render_widget(input, input_area);
 
+    if let Some(ref err) = state.error {
+        f.render_widget(
+            Paragraph::new(err.as_str())
+                .style(Style::default().fg(Color::Red))
+                .alignment(Alignment::Center),
+            chunks[2],
+        );
+    }
+
+    let footer_text = if state.is_loading {
+        "Please wait..."
+    } else {
+        "Press ENTER to start"
+    };
+
     f.render_widget(
-        Paragraph::new("Press ENTER to start")
+        Paragraph::new(footer_text)
             .alignment(Alignment::Center)
             .dark_gray(),
-        chunks[2],
+        chunks[3],
     );
 }
 
@@ -243,7 +270,7 @@ fn render_leaderboard(app: &App, cache: &DbCache, f: &mut Frame, area: Rect, _is
         .enumerate()
         .map(|(i, entry)| {
             let pos = i + 1;
-            let is_own_entry = entry.name == app.user.name;
+            let is_own_entry = app.user.name.as_ref() == Some(&entry.name);
             let style = if is_own_entry {
                 Style::default().bg(Color::DarkGray)
             } else {

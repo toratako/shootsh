@@ -21,8 +21,15 @@ pub struct PlayingState {
 }
 
 #[derive(Clone, PartialEq)]
+pub struct NamingState {
+    pub input: String,
+    pub error: Option<String>,
+    pub is_loading: bool,
+}
+
+#[derive(Clone, PartialEq)]
 pub enum Scene {
-    Naming(String),
+    Naming(NamingState),
     Menu,
     Playing(Box<PlayingState>),
     GameOver {
@@ -37,6 +44,11 @@ impl PartialEq for PlayingState {
             && self.combat_stats.current_score() == other.combat_stats.current_score()
     }
 }
+
+pub type ActionResult = (
+    Result<()>,
+    Option<tokio::sync::oneshot::Receiver<Result<(), String>>>,
+);
 
 pub struct App {
     pub user: UserContext,
@@ -64,8 +76,12 @@ pub enum Action {
 
 impl App {
     pub fn new(user: UserContext, db_tx: mpsc::Sender<DbRequest>, db_cache: Arc<DbCache>) -> Self {
-        let initial_scene = if user.name.is_empty() || user.name == "NewPlayer" {
-            Scene::Naming(String::new())
+        let initial_scene = if user.name.is_none() {
+            Scene::Naming(NamingState {
+                input: String::new(),
+                error: None,
+                is_loading: false,
+            })
         } else {
             Scene::Menu
         };
@@ -84,18 +100,32 @@ impl App {
         }
     }
 
-    pub fn update_state(&mut self, action: Action) -> Result<()> {
+    pub fn update_state(&mut self, action: Action) -> ActionResult {
         match action {
-            Action::Quit => self.should_quit = true,
-            Action::Tick => self.handle_tick()?,
-            Action::MouseMove(x, y) => self.handle_mouse_move(x, y),
-            Action::MouseClick(x, y) => self.handle_click(x, y)?,
-            Action::InputChar(c) => self.handle_input_char(c),
-            Action::DeleteChar => self.handle_delete_char(),
-            Action::SubmitName => self.handle_submit_name(),
-            Action::BackToMenu => self.change_scene(Scene::Menu),
+            Action::Quit => {
+                self.should_quit = true;
+                (Ok(()), None)
+            }
+            Action::Tick => (self.handle_tick(), None),
+            Action::MouseMove(x, y) => {
+                self.handle_mouse_move(x, y);
+                (Ok(()), None)
+            }
+            Action::MouseClick(x, y) => (self.handle_click(x, y), None),
+            Action::InputChar(c) => {
+                self.handle_input_char(c);
+                (Ok(()), None)
+            }
+            Action::DeleteChar => {
+                self.handle_delete_char();
+                (Ok(()), None)
+            }
+            Action::SubmitName => (Ok(()), self.handle_submit_name()),
+            Action::BackToMenu => {
+                self.change_scene(Scene::Menu);
+                (Ok(()), None)
+            }
         }
-        Ok(())
     }
 
     pub fn change_scene(&mut self, new_scene: Scene) {
@@ -233,9 +263,9 @@ impl App {
 
     fn handle_input_char(&mut self, c: char) {
         match &mut self.scene {
-            Scene::Naming(name) => {
-                if name.chars().count() < MAX_PLAYER_NAME_LEN {
-                    name.push(c);
+            Scene::Naming(state) => {
+                if !state.is_loading && state.input.chars().count() < MAX_PLAYER_NAME_LEN {
+                    state.input.push(c);
                 }
             }
             Scene::Playing(_) if c == 'r' => self.start_game(),
@@ -248,22 +278,37 @@ impl App {
     }
 
     fn handle_delete_char(&mut self) {
-        if let Scene::Naming(name) = &mut self.scene {
-            name.pop();
+        if let Scene::Naming(state) = &mut self.scene {
+            if !state.is_loading {
+                state.input.pop();
+            }
         }
     }
 
-    fn handle_submit_name(&mut self) {
-        if let Scene::Naming(name) = &mut self.scene {
-            let trimmed = name.trim().to_string();
+    pub fn handle_submit_name(
+        &mut self,
+    ) -> Option<tokio::sync::oneshot::Receiver<Result<(), String>>> {
+        if let Scene::Naming(state) = &mut self.scene {
+            if state.is_loading {
+                return None;
+            }
+
+            let trimmed = state.input.trim().to_string();
             if !trimmed.is_empty() {
+                let (tx, rx) = tokio::sync::oneshot::channel();
+
+                state.is_loading = true;
+                state.error = None;
+
                 let _ = self.db_tx.try_send(DbRequest::UpdateUsername {
                     user_id: self.user.id,
                     new_name: trimmed,
+                    reply_tx: tx,
                 });
 
-                self.change_scene(Scene::Menu);
+                return Some(rx);
             }
         }
+        None
     }
 }
