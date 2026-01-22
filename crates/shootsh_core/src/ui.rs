@@ -156,13 +156,10 @@ fn render_menu(app: &App, cache: &DbCache, f: &mut Frame, area: Rect) {
         .split(area);
 
     // logo
-    f.render_widget(
-        Paragraph::new(LOGO)
-            .alignment(Alignment::Center)
-            .yellow()
-            .bold(),
-        chunks[0],
-    );
+    let logo_width = LOGO.lines().map(|l| l.len()).max().unwrap_or(0) as u16;
+    let logo_height = LOGO.lines().count() as u16;
+    let logo_area = horizontal_centered_rect(logo_width, logo_height, chunks[0]);
+    f.render_widget(Paragraph::new(LOGO).yellow().bold(), logo_area);
 
     // activity
     render_activity_graph(app, f, chunks[1]);
@@ -290,9 +287,11 @@ fn render_leaderboard(app: &App, cache: &DbCache, f: &mut Frame, area: Rect, _is
             .borders(Borders::ALL),
     );
 
+    // 3 = header, borders...
+    let table_height = (cache.all_time_scores.len() as u16 + 3).min(area.height);
     f.render_widget(
         table,
-        horizontal_centered_rect(TABLE_WIDTH, area.height, area),
+        horizontal_centered_rect(TABLE_WIDTH, table_height, area),
     );
 }
 

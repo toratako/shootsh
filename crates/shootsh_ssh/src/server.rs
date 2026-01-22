@@ -73,7 +73,7 @@ impl russh::server::Server for MyServer {
     type Handler = ClientHandler;
     fn new_client(&mut self, peer_addr: Option<SocketAddr>) -> Self::Handler {
         let count = self.connection_count.fetch_add(1, Ordering::Relaxed) + 1;
-        println!("New connection from {:?}. Active: {}", peer_addr, count);
+        println!("[+] New connection from {:?}. Active: {}", peer_addr, count);
         let (update_tx, update_rx) = mpsc::unbounded_channel();
         ClientHandler {
             db_tx: self.db_tx.clone(),
@@ -164,10 +164,13 @@ impl ClientHandler {
         tokio::time::timeout(Duration::from_secs(2), rx)
             .await
             .map_err(|_| {
-                println!("Login timeout for fingerprint: {}", fp);
+                println!("[x] Login timeout for fingerprint: {}", fp);
                 russh::Error::Inconsistent
             })? // timeout error
-            .map_err(|_| russh::Error::Inconsistent) // oneshot recv error
+            .map_err(|_| {
+                println!("[x] Login oneshot recv error for fingerprint: {}", fp);
+                russh::Error::Inconsistent
+            }) // oneshot recv error
     }
 
     fn run_render_loop(
@@ -276,6 +279,9 @@ impl Handler for ClientHandler {
         let fp = key
             .fingerprint(russh::keys::ssh_key::HashAlg::Sha256)
             .to_string();
+
+        println!("[v] Authenticated with fingerprint:{}", fp);
+
         self.fingerprint = Some(fp);
 
         Ok(Auth::Accept)
@@ -337,6 +343,8 @@ impl Handler for ClientHandler {
         let fp = match self.fingerprint.clone() {
             Some(fp) => fp,
             None => {
+                println!("[x] Password authentication rejected.");
+
                 let error_header = "Error: Public key authentication is required."
                     .with(Color::Red)
                     .bold();
@@ -408,6 +416,6 @@ impl Drop for ClientHandler {
     fn drop(&mut self) {
         // DO NOT REMOVE SESSION HERE! (kick_existing_session handles this well)
         let count = self.connection_count.fetch_sub(1, Ordering::Relaxed) - 1;
-        println!("Connection closed. Active: {}", count);
+        println!("[-] Connection closed. Active: {}", count);
     }
 }
