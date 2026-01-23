@@ -4,9 +4,9 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-DB_FILE="../shootsh.db"
-TEMPLATE_FILE="index_template.html"
-OUTPUT_FILE="index.html"
+DB_FILE="/var/lib/shootsh/shootsh.db"
+TEMPLATE_FILE="/var/www/shootsh/index_template.html"
+OUTPUT_FILE="/var/www/shootsh/index.html"
 
 CURRENT_DATE=$(date '+%Y-%m-%d')
 WORK_TMP=$(mktemp)
