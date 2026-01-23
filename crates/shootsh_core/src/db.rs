@@ -13,6 +13,9 @@ pub struct UserContext {
     pub fingerprint: String,
     pub name: Option<String>,
     pub high_score: u32,
+    pub total_hits: u32,
+    pub total_misses: u32,
+    pub sessions: u32,
     pub user_activity: Vec<ActivityDay>,
 }
 
@@ -306,10 +309,16 @@ impl Repository {
 
     pub fn get_or_create_user_context(&self, fingerprint: &str) -> Result<UserContext> {
         let mut stmt = self.conn.prepare_cached(
-            "SELECT u.id, u.username, IFNULL(s.high_score, 0) 
-            FROM users u 
-            LEFT JOIN user_stats s ON u.id = s.user_id 
-            WHERE u.fingerprint = ?1",
+            "SELECT
+            u.id,
+            u.username,
+            IFNULL(s.high_score, 0),
+            IFNULL(s.total_hits, 0),
+            IFNULL(s.total_misses, 0),
+            IFNULL(s.sessions, 0)
+        FROM users u 
+        LEFT JOIN user_stats s ON u.id = s.user_id 
+        WHERE u.fingerprint = ?1",
         )?;
 
         let res = stmt.query_row(params![fingerprint], |row| {
@@ -321,6 +330,9 @@ impl Repository {
                 fingerprint: fingerprint.to_string(),
                 name: row.get(1)?,
                 high_score: row.get(2)?,
+                total_hits: row.get(3)?,
+                total_misses: row.get(4)?,
+                sessions: row.get(5)?,
                 user_activity,
             })
         });
@@ -335,6 +347,9 @@ impl Repository {
                     fingerprint: fingerprint.to_string(),
                     name: None,
                     high_score: 0,
+                    total_hits: 0,
+                    total_misses: 0,
+                    sessions: 0,
                     user_activity: Vec::new(),
                 })
             }

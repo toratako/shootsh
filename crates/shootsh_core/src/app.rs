@@ -186,11 +186,17 @@ impl App {
             misses: stats.miss_count,
         });
 
+        // honestly, should wait db response and react.
         // update high score
         let is_new_record = final_score > self.user.high_score;
         if is_new_record {
             self.user.high_score = final_score;
         }
+
+        // update stats
+        self.user.total_hits += stats.hit_count;
+        self.user.total_misses += stats.miss_count;
+        self.user.sessions += 1;
 
         // update activity
         let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
