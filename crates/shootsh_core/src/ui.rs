@@ -1,4 +1,4 @@
-use crate::app::{App, NamingState, PlayingState, Scene};
+use crate::app::{App, LeaderboardTab, NamingState, PlayingState, Scene};
 use crate::db::DbCache;
 use chrono::{Datelike, Utc};
 use ratatui::{prelude::*, widgets::*};
@@ -110,7 +110,9 @@ fn render_footer(app: &App, f: &mut Frame, area: Rect) {
     let spans = match &app.scene {
         Scene::Naming(_) => vec![" [ENTER]".yellow(), " Submit ".into()],
         Scene::Menu => vec![
-            " [Ctrl-K]".red().bold(),
+            " [h/l]".yellow(),
+            " Switch Ranking ".into(),
+            " [Ctrl-K]".red(),
             " Delete Account ".into(),
             " [q]".yellow(),
             " Quit ".into(),
@@ -255,10 +257,10 @@ fn render_menu(app: &App, cache: &DbCache, f: &mut Frame, area: Rect) {
         .direction(Direction::Vertical)
         .margin(2)
         .constraints([
-            Constraint::Length(7), // logo
-            Constraint::Length(9), // activity & stats
-            Constraint::Length(4), // message
-            Constraint::Min(0),    // leaderboard
+            Constraint::Length(7),  // logo
+            Constraint::Length(4),  // message
+            Constraint::Length(12), // leaderboard
+            Constraint::Min(0),     // activity & stats
         ])
         .split(area);
 
@@ -268,17 +270,6 @@ fn render_menu(app: &App, cache: &DbCache, f: &mut Frame, area: Rect) {
     let logo_area = horizontal_centered_rect(logo_width, logo_height, chunks[0]);
     f.render_widget(Paragraph::new(LOGO).yellow().bold(), logo_area);
 
-    // activity & stats
-    let activity_stats_layout = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(0), Constraint::Length(30)])
-        .split(chunks[1]);
-
-    // activity
-    render_activity_graph(app, f, activity_stats_layout[0]);
-    // stats
-    render_stats(app, f, activity_stats_layout[1]);
-
     // message
     let mut lines = vec![Line::from("!!! CLICK TO START !!!").bold().slow_blink()];
     if app.user.high_score > 0 {
@@ -286,11 +277,35 @@ fn render_menu(app: &App, cache: &DbCache, f: &mut Frame, area: Rect) {
     }
     f.render_widget(
         Paragraph::new(lines).alignment(Alignment::Center),
-        chunks[2],
+        chunks[1],
     );
 
     // leaderboard
-    render_leaderboard(app, cache, f, chunks[3], false);
+    render_leaderboard(app, cache, f, chunks[2], false);
+
+    // activity & stats
+    let activity_stats_layout = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Min(0),
+            Constraint::Length(80),
+            Constraint::Min(0),
+        ])
+        .split(chunks[3]);
+
+    let inner_layout = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Min(0),
+            Constraint::Length(2),
+            Constraint::Length(30),
+        ])
+        .split(activity_stats_layout[1]);
+
+    // activity
+    render_activity_graph(app, f, inner_layout[0]);
+    // stats
+    render_stats(app, f, inner_layout[2]);
 }
 
 fn render_playing(state: &PlayingState, f: &mut Frame, area: Rect) {
@@ -387,8 +402,13 @@ fn render_reset_confirmation(f: &mut Frame, area: Rect) {
 }
 
 fn render_leaderboard(app: &App, cache: &DbCache, f: &mut Frame, area: Rect, _is_game_over: bool) {
-    let rows: Vec<Row> = cache
-        .all_time_scores
+    let (scores, title) = match app.leaderboard_tab {
+        LeaderboardTab::Daily => (&cache.daily_scores, " DAILY RANKING "),
+        LeaderboardTab::Weekly => (&cache.weekly_scores, " WEEKLY RANKING "),
+        LeaderboardTab::AllTime => (&cache.all_time_scores, " OVERALL RANKING "),
+    };
+
+    let rows: Vec<Row> = scores
         .iter()
         .enumerate()
         .map(|(i, entry)| {
@@ -431,11 +451,7 @@ fn render_leaderboard(app: &App, cache: &DbCache, f: &mut Frame, area: Rect, _is
             .underlined()
             .cyan(),
     )
-    .block(
-        Block::default()
-            .title(" GLOBAL RANKING ")
-            .borders(Borders::ALL),
-    );
+    .block(Block::default().title(title).borders(Borders::ALL));
 
     // 3 = header, borders...
     let table_height = (cache.all_time_scores.len() as u16 + 3).min(area.height);

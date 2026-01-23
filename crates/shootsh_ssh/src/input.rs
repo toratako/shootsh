@@ -61,6 +61,12 @@ pub fn map_input_to_action(
                     KeyCode::Char('r') => Some(Action::Restart),
                     KeyCode::Char('y') => Some(Action::ConfirmReset),
                     KeyCode::Char('n') => Some(Action::CancelReset),
+
+                    KeyCode::Char('h') => Some(Action::NavigateLeft),
+                    KeyCode::Char('l') => Some(Action::NavigateRight),
+                    KeyCode::LeftArrow => Some(Action::NavigateLeft),
+                    KeyCode::RightArrow => Some(Action::NavigateRight),
+
                     KeyCode::Enter => Some(Action::SubmitInput),
                     KeyCode::Backspace => Some(Action::DeleteCharacter),
                     KeyCode::Escape => Some(Action::BackToMenu),

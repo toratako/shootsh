@@ -51,6 +51,37 @@ pub type ActionResult = (
     Option<tokio::sync::oneshot::Receiver<Result<(), anyhow::Error>>>,
 );
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LeaderboardTab {
+    Daily,
+    Weekly,
+    AllTime,
+}
+
+impl Default for LeaderboardTab {
+    fn default() -> Self {
+        Self::AllTime
+    }
+}
+
+impl LeaderboardTab {
+    pub fn next(&self) -> Self {
+        match self {
+            Self::Daily => Self::Weekly,
+            Self::Weekly => Self::AllTime,
+            Self::AllTime => Self::Daily,
+        }
+    }
+
+    pub fn prev(&self) -> Self {
+        match self {
+            Self::Daily => Self::AllTime,
+            Self::Weekly => Self::Daily,
+            Self::AllTime => Self::Weekly,
+        }
+    }
+}
+
 pub struct App {
     pub user: UserContext,
     pub scene: Scene,
@@ -62,6 +93,7 @@ pub struct App {
     pub should_quit: bool,
     validator: InteractionValidator,
     pub last_cheat_warning: Option<Instant>,
+    pub leaderboard_tab: LeaderboardTab,
 }
 
 pub enum Action {
@@ -77,6 +109,8 @@ pub enum Action {
     ConfirmReset,
     CancelReset,
     Restart,
+    NavigateLeft,
+    NavigateRight,
 }
 
 impl App {
@@ -102,6 +136,7 @@ impl App {
             validator: InteractionValidator::new(Default::default()),
             last_cheat_warning: None,
             db_tx,
+            leaderboard_tab: LeaderboardTab::default(),
         }
     }
 
@@ -140,6 +175,14 @@ impl App {
                 (Ok(()), None)
             }
             Action::MouseClick(x, y) => (self.handle_click(x, y), None),
+            Action::NavigateLeft => {
+                self.handle_navigate_left();
+                (Ok(()), None)
+            }
+            Action::NavigateRight => {
+                self.handle_navigate_right();
+                (Ok(()), None)
+            }
             Action::AppendCharacter(c) => (self.handle_append_char(c), None),
             Action::DeleteCharacter => (self.handle_delete_char(), None),
             Action::SubmitInput => (Ok(()), self.handle_submit_name()),
@@ -352,5 +395,23 @@ impl App {
         }
 
         Some(rx)
+    }
+
+    fn handle_navigate_left(&mut self) {
+        match &self.scene {
+            Scene::Menu | Scene::GameOver { .. } => {
+                self.leaderboard_tab = self.leaderboard_tab.prev();
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_navigate_right(&mut self) {
+        match &self.scene {
+            Scene::Menu | Scene::GameOver { .. } => {
+                self.leaderboard_tab = self.leaderboard_tab.next();
+            }
+            _ => {}
+        }
     }
 }

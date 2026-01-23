@@ -145,6 +145,12 @@ async fn handle_event(app: &mut App, event: Event) -> Result<()> {
                     KeyCode::Char('r') => Some(Action::Restart),
                     KeyCode::Char('y') => Some(Action::ConfirmReset),
                     KeyCode::Char('n') => Some(Action::CancelReset),
+
+                    KeyCode::Char('h') => Some(Action::NavigateLeft),
+                    KeyCode::Char('l') => Some(Action::NavigateRight),
+                    KeyCode::Left => Some(Action::NavigateLeft),
+                    KeyCode::Right => Some(Action::NavigateRight),
+
                     KeyCode::Enter => Some(Action::SubmitInput),
                     KeyCode::Backspace => Some(Action::DeleteCharacter),
                     KeyCode::Esc => Some(Action::BackToMenu),
