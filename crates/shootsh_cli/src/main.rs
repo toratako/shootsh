@@ -125,17 +125,16 @@ async fn handle_event(app: &mut App, event: Event) -> Result<()> {
                 KeyCode::Char('d') if is_ctrl => Some(Action::Quit),
                 KeyCode::Char('k') if is_ctrl => Some(Action::RequestReset),
 
-                KeyCode::Char('y') if matches!(app.scene, Scene::ResetConfirmation) => {
-                    Some(Action::ConfirmReset)
-                }
-                KeyCode::Char('n') if matches!(app.scene, Scene::ResetConfirmation) => {
-                    Some(Action::CancelReset)
-                }
+                KeyCode::Char('y') => Some(Action::ConfirmReset),
+                KeyCode::Char('n') => Some(Action::CancelReset),
+
+                KeyCode::Char('r') => Some(Action::Restart),
+                KeyCode::Char('q') => Some(Action::Quit),
 
                 KeyCode::Enter => Some(Action::SubmitName),
-                KeyCode::Char(c) => Some(Action::InputChar(c)),
                 KeyCode::Backspace => Some(Action::DeleteChar),
                 KeyCode::Esc => Some(Action::BackToMenu),
+                KeyCode::Char(c) => Some(Action::InputChar(c)),
                 _ => None,
             }
         }
