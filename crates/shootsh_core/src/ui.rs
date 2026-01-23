@@ -29,6 +29,7 @@ pub fn render(app: &App, cache: &DbCache, f: &mut Frame) {
             final_score,
             is_new_record,
         } => render_game_over(app, cache, *final_score, *is_new_record, f, area),
+        Scene::ResetConfirmation => render_reset_confirmation(f, area),
     }
     render_warning(app, f, area);
     render_cursor(app, f);
@@ -261,6 +262,40 @@ fn render_game_over(
     ];
     f.render_widget(Paragraph::new(msg).alignment(Alignment::Center), chunks[0]);
     render_leaderboard(app, cache, f, chunks[1], true);
+}
+
+fn render_reset_confirmation(f: &mut Frame, area: Rect) {
+    let block_area = absolute_centered_rect(50, 10, area);
+
+    f.render_widget(Clear, block_area);
+
+    let block = Block::default()
+        .title(" DANGER ACTION ")
+        .title_alignment(Alignment::Center)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Red).bold())
+        .bg(Color::Black);
+
+    let text = vec![
+        Line::from(""),
+        Line::from("Are you sure you want to").alignment(Alignment::Center),
+        Line::from("DELETE ALL YOUR DATA?")
+            .red()
+            .bold()
+            .alignment(Alignment::Center),
+        Line::from(""),
+        Line::from(""),
+        Line::from(vec![
+            " Confirm: ".into(),
+            "y".yellow().bold(),
+            "  |  Cancel: ".into(),
+            "n / Esc".yellow().bold(),
+        ])
+        .alignment(Alignment::Center),
+    ];
+
+    let paragraph = Paragraph::new(text).block(block);
+    f.render_widget(paragraph, block_area);
 }
 
 fn render_leaderboard(app: &App, cache: &DbCache, f: &mut Frame, area: Rect, _is_game_over: bool) {

@@ -266,6 +266,10 @@ impl ClientHandler {
 
                     let render_result = {
                         let mut app = app.lock().unwrap();
+                        if app.should_quit {
+                            break;
+                        }
+
                         let sz = *terminal_size.lock().unwrap();
                         app.db_cache = shared_cache.load_full();
 
@@ -470,13 +474,18 @@ impl Handler for ClientHandler {
                 tokio::spawn(async move {
                     if let Ok(result) = rx.await {
                         let mut app_inner = app_clone.lock().unwrap();
+                        let current_scene = app_inner.scene.clone();
                         match result {
-                            Ok(_) => {
-                                if let Scene::Naming(state) = &app_inner.scene {
+                            Ok(_) => match current_scene {
+                                Scene::Naming(state) => {
                                     app_inner.user.name = Some(state.input.clone());
+                                    app_inner.change_scene(Scene::Menu);
                                 }
-                                app_inner.change_scene(Scene::Menu);
-                            }
+                                Scene::ResetConfirmation => {
+                                    app_inner.should_quit = true;
+                                }
+                                _ => app_inner.change_scene(Scene::Menu),
+                            },
                             Err(e) => {
                                 if let Scene::Naming(state) = &mut app_inner.scene {
                                     state.error = Some(e);

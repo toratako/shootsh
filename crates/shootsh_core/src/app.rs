@@ -36,6 +36,7 @@ pub enum Scene {
         final_score: u32,
         is_new_record: bool,
     },
+    ResetConfirmation,
 }
 
 impl PartialEq for PlayingState {
@@ -72,6 +73,9 @@ pub enum Action {
     Quit,
     BackToMenu,
     Tick,
+    RequestReset,
+    ConfirmReset,
+    CancelReset,
 }
 
 impl App {
@@ -104,6 +108,24 @@ impl App {
         match action {
             Action::Quit => {
                 self.should_quit = true;
+                (Ok(()), None)
+            }
+            Action::RequestReset => {
+                if matches!(self.scene, Scene::Menu) {
+                    self.change_scene(Scene::ResetConfirmation);
+                }
+                (Ok(()), None)
+            }
+            Action::ConfirmReset => {
+                if matches!(self.scene, Scene::ResetConfirmation) {
+                    return (Ok(()), self.handle_delete_user());
+                }
+                (Ok(()), None)
+            }
+            Action::CancelReset => {
+                if matches!(self.scene, Scene::ResetConfirmation) {
+                    self.change_scene(Scene::Menu);
+                }
                 (Ok(()), None)
             }
             Action::Tick => (self.handle_tick(), None),
@@ -310,5 +332,29 @@ impl App {
             }
         }
         None
+    }
+
+    fn handle_delete_user(&mut self) -> Option<tokio::sync::oneshot::Receiver<Result<(), String>>> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let user_id = self.user.id;
+
+        let db_tx = self.db_tx.clone();
+        tokio::spawn(async move {
+            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+            let _ = db_tx
+                .send(DbRequest::DeleteUser {
+                    user_id,
+                    reply_tx: reply_tx,
+                })
+                .await;
+
+            let result = match reply_rx.await {
+                Ok(Ok(())) => Ok(()),
+                _ => Err("Failed to delete user data".to_string()),
+            };
+            let _ = tx.send(result);
+        });
+
+        Some(rx)
     }
 }

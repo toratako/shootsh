@@ -35,12 +35,16 @@ impl InputTransformer {
     fn static_map_event(event: InputEvent, last_buttons: &mut MouseButtons) -> Option<Action> {
         match event {
             InputEvent::Key(k) => {
+                let is_ctrl = k.modifiers.contains(termwiz::input::Modifiers::CTRL);
+
                 match k.key {
-                    KeyCode::Char('c') => return Some(Action::Quit),
-                    KeyCode::Char('d') => return Some(Action::Quit),
-                    _ => {}
-                }
-                match k.key {
+                    KeyCode::Char('c') if is_ctrl => Some(Action::Quit),
+                    KeyCode::Char('d') if is_ctrl => Some(Action::Quit),
+                    KeyCode::Char('k') if is_ctrl => Some(Action::RequestReset),
+
+                    KeyCode::Char('y') => Some(Action::ConfirmReset),
+                    KeyCode::Char('n') => Some(Action::CancelReset),
+
                     KeyCode::Enter => Some(Action::SubmitName),
                     KeyCode::Backspace => Some(Action::DeleteChar),
                     KeyCode::Escape => Some(Action::BackToMenu),

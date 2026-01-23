@@ -59,6 +59,10 @@ pub enum DbRequest {
         fingerprint: String,
         reply_tx: tokio::sync::oneshot::Sender<UserContext>,
     },
+    DeleteUser {
+        user_id: i64,
+        reply_tx: tokio::sync::oneshot::Sender<Result<()>>,
+    },
 }
 
 impl Repository {
@@ -107,6 +111,16 @@ impl Repository {
                     None
                 }
             }
+            DbRequest::DeleteUser { user_id, reply_tx } => match self.delete_user(user_id) {
+                Ok(_) => {
+                    let _ = reply_tx.send(Ok(()));
+                    Some(self.get_current_cache())
+                }
+                Err(e) => {
+                    let _ = reply_tx.send(Err(e.into()));
+                    None
+                }
+            },
             DbRequest::UpdateUsername {
                 user_id,
                 new_name,
@@ -127,6 +141,12 @@ impl Repository {
                 }
             },
         }
+    }
+
+    pub fn delete_user(&self, user_id: i64) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM users WHERE id = ?1", params![user_id])?;
+        Ok(())
     }
 
     pub fn save_game(&self, user_id: i64, score: u32, hits: u32, misses: u32) -> Result<()> {
