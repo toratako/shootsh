@@ -107,33 +107,67 @@ fn render_cursor(app: &App, f: &mut Frame) {
 fn render_footer(app: &App, f: &mut Frame, area: Rect) {
     let style = Style::default().bg(Color::Indexed(234)).fg(Color::DarkGray);
 
-    let mut spans = match &app.scene {
+    let spans = match &app.scene {
         Scene::Naming(_) => vec![" [ENTER]".yellow(), " Submit ".into()],
-        Scene::Menu => vec![" [Ctrl-K]".red().bold(), " Delete Account ".into()],
+        Scene::Menu => vec![
+            " [Ctrl-K]".red().bold(),
+            " Delete Account ".into(),
+            " [q]".yellow(),
+            " Quit ".into(),
+        ],
         Scene::Playing(_) => vec![
             " [ESC]".yellow(),
             " Menu ".into(),
             " [r]".yellow(),
             " Restart ".into(),
+            " [q]".yellow(),
+            " Quit ".into(),
         ],
         Scene::GameOver { .. } => vec![
             " [ESC]".yellow(),
             " Menu ".into(),
             " [r]".yellow(),
             " Retry ".into(),
+            " [q]".yellow(),
+            " Quit ".into(),
         ],
         Scene::ResetConfirmation => vec![
             " [y]".red().bold(),
             " Confirm RESET ".into(),
             " [n/ESC]".yellow(),
             " Cancel ".into(),
+            " [q]".yellow(),
+            " Quit ".into(),
         ],
     };
 
-    spans.push(" [q]".yellow());
-    spans.push(" Quit ".into());
-
     f.render_widget(Paragraph::new(Line::from(spans)).style(style), area);
+}
+
+fn render_stats(app: &App, f: &mut Frame, area: Rect) {
+    let name = app.user.name.as_deref().unwrap_or("");
+    let title = format!(" [ {}'S STATS ] ", name);
+
+    let total_shots = app.user.total_hits + app.user.total_misses;
+    let acc = if total_shots > 0 {
+        (app.user.total_hits as f64 / total_shots as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    let stats_text = vec![
+        Line::from(title).yellow().bold(),
+        Line::from(format!(" Sessions:   {}", app.user.sessions)),
+        Line::from(format!(" High Score: {}", app.user.high_score)).cyan(),
+        Line::from(format!(" Accuracy:   {:.1}%", acc)).green(),
+    ];
+
+    f.render_widget(
+        Paragraph::new(stats_text)
+            .block(Block::default().borders(Borders::NONE))
+            .alignment(Alignment::Left),
+        area,
+    );
 }
 
 fn render_size_error(f: &mut Frame, area: Rect) {
@@ -222,7 +256,7 @@ fn render_menu(app: &App, cache: &DbCache, f: &mut Frame, area: Rect) {
         .margin(2)
         .constraints([
             Constraint::Length(7), // logo
-            Constraint::Length(9), // activity
+            Constraint::Length(9), // activity & stats
             Constraint::Length(4), // message
             Constraint::Min(0),    // leaderboard
         ])
@@ -234,9 +268,18 @@ fn render_menu(app: &App, cache: &DbCache, f: &mut Frame, area: Rect) {
     let logo_area = horizontal_centered_rect(logo_width, logo_height, chunks[0]);
     f.render_widget(Paragraph::new(LOGO).yellow().bold(), logo_area);
 
-    // activity
-    render_activity_graph(app, f, chunks[1]);
+    // activity & stats
+    let activity_stats_layout = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(0), Constraint::Length(30)])
+        .split(chunks[1]);
 
+    // activity
+    render_activity_graph(app, f, activity_stats_layout[0]);
+    // stats
+    render_stats(app, f, activity_stats_layout[1]);
+
+    // message
     let mut lines = vec![Line::from("!!! CLICK TO START !!!").bold().slow_blink()];
     if app.user.high_score > 0 {
         lines.push(Line::from(format!("HIGH SCORE: {}", app.user.high_score)).cyan());
