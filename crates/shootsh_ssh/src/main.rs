@@ -27,7 +27,8 @@ async fn main() -> Result<()> {
 
     tracing::info!("Starting shootsh_ssh server...");
 
-    let conn = Connection::open("shootsh.db").context("Failed to open DB")?;
+    let db_path = std::env::var("DB_PATH").unwrap_or_else(|_| "shootsh.db".to_string());
+    let conn = Connection::open(db_path).context("Failed to open DB")?;
     let repo = Repository::new(conn, DEFAULT_MAX_USERS).context("Failed to init repo")?;
     let shared_cache = Arc::new(ArcSwap::from_pointee(repo.get_current_cache()));
     let (db_tx, db_rx) = mpsc::channel::<DbRequest>(100);
