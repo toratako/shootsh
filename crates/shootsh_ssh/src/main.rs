@@ -57,7 +57,22 @@ async fn main() -> Result<()> {
     let socket = TcpListener::bind(addr).await?;
     println!("Starting shootsh_ssh on {}", addr);
 
-    sh.run_on_socket(config, &socket).await?;
+    tokio::select! {
+            res = sh.run_on_socket(config, &socket) => {
+                if let Err(e) = res {
+                    eprintln!("Server error: {:?}", e);
+                }
+            },
+    _ = tokio::signal::ctrl_c() => {
+                println!("\n[!] Shutdown signal received. Cleaning up sessions...");
+                sh.cleanup_all_sessions().await;
+
+                // wait for cleanup
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                println!("[!] Cleanup complete. Exiting.");
+            }
+        }
+
     Ok(())
 }
 

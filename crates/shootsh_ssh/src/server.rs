@@ -53,12 +53,31 @@ impl std::io::Write for SharedBuffer {
     }
 }
 
+pub struct SessionInfo {
+    pub handle: russh::server::Handle,
+    pub channel_id: ChannelId,
+}
+
 #[derive(Clone)]
 pub struct MyServer {
     pub db_tx: mpsc::Sender<DbRequest>,
     pub shared_cache: Arc<ArcSwap<DbCache>>,
     pub connection_count: Arc<AtomicUsize>,
-    pub active_sessions: Arc<Mutex<HashMap<String, russh::server::Handle>>>,
+    pub active_sessions: Arc<Mutex<HashMap<String, SessionInfo>>>,
+}
+
+impl MyServer {
+    pub async fn cleanup_all_sessions(&self) {
+        let mut sessions = self.active_sessions.lock().unwrap();
+        let session_list: Vec<_> = sessions.drain().collect();
+        drop(sessions);
+
+        for (fp, info) in session_list {
+            let _ = info.handle.data(info.channel_id, CLEANUP_SEQ.into()).await;
+            let _ = info.handle.close(info.channel_id).await;
+            println!("[-] Sent cleanup to fingerprint: {}", fp);
+        }
+    }
 }
 
 impl russh::server::Server for MyServer {
@@ -99,7 +118,7 @@ pub struct ClientHandler {
     terminal: Option<Terminal<CrosstermBackend<SharedBuffer>>>,
     output_buffer: SharedBuffer,
     pub fingerprint: Option<String>,
-    pub active_sessions: Arc<Mutex<HashMap<String, russh::server::Handle>>>,
+    pub active_sessions: Arc<Mutex<HashMap<String, SessionInfo>>>,
 }
 
 impl ClientHandler {
@@ -128,14 +147,23 @@ impl ClientHandler {
         channel: ChannelId,
         current_handle: russh::server::Handle,
     ) {
-        let old_handle = {
+        let old_session = {
             let mut sessions = self.active_sessions.lock().unwrap();
-            sessions.insert(fp.to_string(), current_handle)
+            sessions.insert(
+                fp.to_string(),
+                SessionInfo {
+                    handle: current_handle,
+                    channel_id: channel,
+                },
+            )
         };
 
-        if let Some(old_handle) = old_handle {
-            let _ = old_handle.data(channel, CLEANUP_SEQ.into()).await;
-            let _ = old_handle.close(channel).await;
+        if let Some(old_session) = old_session {
+            let _ = old_session
+                .handle
+                .data(old_session.channel_id, CLEANUP_SEQ.into())
+                .await;
+            let _ = old_session.handle.close(old_session.channel_id).await;
         }
     }
 
@@ -345,6 +373,14 @@ impl Handler for ClientHandler {
             .await;
 
         let user_context = self.fetch_user_context(&fp).await?;
+
+        self.active_sessions.lock().unwrap().insert(
+            fp.clone(),
+            SessionInfo {
+                handle: session.handle(),
+                channel_id: channel,
+            },
+        );
 
         let initial_cache = self.shared_cache.load_full();
         let mut app = App::new(user_context, self.db_tx.clone(), initial_cache);
