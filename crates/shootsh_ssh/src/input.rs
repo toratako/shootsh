@@ -45,6 +45,9 @@ impl InputTransformer {
                     KeyCode::Char('y') => Some(Action::ConfirmReset),
                     KeyCode::Char('n') => Some(Action::CancelReset),
 
+                    KeyCode::Char('r') => Some(Action::Restart),
+                    KeyCode::Char('q') => Some(Action::Quit),
+
                     KeyCode::Enter => Some(Action::SubmitName),
                     KeyCode::Backspace => Some(Action::DeleteChar),
                     KeyCode::Escape => Some(Action::BackToMenu),

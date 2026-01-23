@@ -76,6 +76,7 @@ pub enum Action {
     RequestReset,
     ConfirmReset,
     CancelReset,
+    Restart,
 }
 
 impl App {
@@ -106,6 +107,15 @@ impl App {
 
     pub fn update_state(&mut self, action: Action) -> ActionResult {
         match action {
+            Action::Restart => {
+                match self.scene {
+                    Scene::Playing(_) | Scene::GameOver { .. } => {
+                        self.start_game();
+                    }
+                    _ => {}
+                }
+                (Ok(()), None)
+            }
             Action::Quit => {
                 self.should_quit = true;
                 (Ok(()), None)
@@ -284,17 +294,9 @@ impl App {
     }
 
     fn handle_input_char(&mut self, c: char) {
-        match &mut self.scene {
-            Scene::Naming(state) => {
-                if !state.is_loading && state.input.chars().count() < MAX_PLAYER_NAME_LEN {
-                    state.input.push(c);
-                }
-            }
-            Scene::Playing(_) if c == 'r' => self.start_game(),
-            _ => {
-                if c == 'q' {
-                    self.should_quit = true;
-                }
+        if let Scene::Naming(state) = &mut self.scene {
+            if !state.is_loading && state.input.chars().count() < MAX_PLAYER_NAME_LEN {
+                state.input.push(c);
             }
         }
     }
