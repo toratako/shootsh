@@ -259,7 +259,7 @@ fn render_menu(app: &App, cache: &DbCache, f: &mut Frame, area: Rect) {
         .constraints([
             Constraint::Length(7),  // logo
             Constraint::Length(4),  // message
-            Constraint::Length(12), // leaderboard
+            Constraint::Length(14), // leaderboard
             Constraint::Min(0),     // activity & stats
         ])
         .split(area);
