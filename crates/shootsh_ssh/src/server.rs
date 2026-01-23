@@ -14,6 +14,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::mpsc;
+use tracing::Instrument;
 
 const SETUP_SEQ: &[u8] = concat!(
     "\x1b[?1049h", // EnterAlternateScreen
@@ -75,7 +76,7 @@ impl MyServer {
         for (fp, info) in session_list {
             let _ = info.handle.data(info.channel_id, CLEANUP_SEQ.into()).await;
             let _ = info.handle.close(info.channel_id).await;
-            println!("[-] Sent cleanup to fingerprint: {}", fp);
+            tracing::info!(fingerprint = %fp, "Sent cleanup sequence and closed session");
         }
     }
 }
@@ -84,7 +85,11 @@ impl russh::server::Server for MyServer {
     type Handler = ClientHandler;
     fn new_client(&mut self, peer_addr: Option<SocketAddr>) -> Self::Handler {
         let count = self.connection_count.fetch_add(1, Ordering::Relaxed) + 1;
-        println!("[+] New connection from {:?}. Active: {}", peer_addr, count);
+
+        let span = tracing::info_span!("client", addr = ?peer_addr, fp = tracing::field::Empty);
+        let _enter = span.enter();
+        tracing::info!(active_connections = count, "New connection");
+
         let (update_tx, update_rx) = mpsc::unbounded_channel();
         ClientHandler {
             db_tx: self.db_tx.clone(),
@@ -102,6 +107,7 @@ impl russh::server::Server for MyServer {
             output_buffer: SharedBuffer::default(),
             fingerprint: None,
             active_sessions: self.active_sessions.clone(),
+            span: span.clone(),
         }
     }
 }
@@ -119,6 +125,7 @@ pub struct ClientHandler {
     output_buffer: SharedBuffer,
     pub fingerprint: Option<String>,
     pub active_sessions: Arc<Mutex<HashMap<String, SessionInfo>>>,
+    pub span: tracing::Span,
 }
 
 impl ClientHandler {
@@ -184,11 +191,11 @@ impl ClientHandler {
         tokio::time::timeout(Duration::from_secs(2), rx)
             .await
             .map_err(|_| {
-                println!("[x] Login timeout for fingerprint: {}", fp);
+                tracing::error!(reason = "timeout", "Login failed");
                 russh::Error::Inconsistent
             })? // timeout error
             .map_err(|_| {
-                println!("[x] Login oneshot recv error for fingerprint: {}", fp);
+                tracing::error!(reason = "error", "Login failed");
                 russh::Error::Inconsistent
             }) // oneshot recv error
     }
@@ -199,6 +206,8 @@ impl ClientHandler {
         session_handle: russh::server::Handle,
         app: Arc<Mutex<App>>,
     ) {
+        let span = self.span.clone();
+
         let mut rx = self
             .update_rx
             .take()
@@ -208,69 +217,75 @@ impl ClientHandler {
         let shared_cache = self.shared_cache.clone();
         let output_buffer = self.output_buffer.clone();
 
-        tokio::spawn(async move {
-            struct DropGuard {
-                handle: russh::server::Handle,
-                chan: ChannelId,
-            }
+        tokio::spawn(
+            async move {
+                tracing::debug!("Render loop started");
 
-            impl Drop for DropGuard {
-                fn drop(&mut self) {
-                    let h = self.handle.clone();
-                    let c = self.chan;
-                    tokio::spawn(async move {
-                        let _ = h.data(c, CLEANUP_SEQ.into()).await;
-                        let _ = h.close(c).await;
-                    });
-                }
-            }
-
-            let _guard = DropGuard {
-                handle: session_handle.clone(),
-                chan: channel,
-            };
-
-            let mut interval = tokio::time::interval(Duration::from_millis(33));
-            loop {
-                tokio::select! {
-                    _ = interval.tick() => {},
-                    res = rx.recv() => {
-                        if res.is_none() { break; }
-                    },
+                struct DropGuard {
+                    handle: russh::server::Handle,
+                    chan: ChannelId,
                 }
 
-                let render_result = {
-                    let mut app = app.lock().unwrap();
-                    let sz = *terminal_size.lock().unwrap();
-                    app.db_cache = shared_cache.load_full();
-
-                    app.update_state(Action::Tick).0.ok();
-
-                    let t = term.get_or_insert_with(|| {
-                        let backend = CrosstermBackend::new(output_buffer.clone());
-                        Terminal::with_options(
-                            backend,
-                            TerminalOptions {
-                                viewport: Viewport::Fixed(Rect::new(0, 0, sz.width, sz.height)),
-                            },
-                        )
-                        .expect("Failed to create terminal")
-                    });
-
-                    let current_area = Rect::new(0, 0, sz.width, sz.height);
-                    if t.size().unwrap() != current_area.into() {
-                        t.resize(current_area).ok();
+                impl Drop for DropGuard {
+                    fn drop(&mut self) {
+                        let h = self.handle.clone();
+                        let c = self.chan;
+                        tokio::spawn(async move {
+                            let _ = h.data(c, CLEANUP_SEQ.into()).await;
+                            let _ = h.close(c).await;
+                        });
                     }
+                }
 
-                    (Self::render_frame(&app, t, &output_buffer), app.should_quit)
+                let _guard = DropGuard {
+                    handle: session_handle.clone(),
+                    chan: channel,
                 };
 
-                let (buffer, should_quit) = render_result;
-                if session_handle.data(channel, buffer.into()).await.is_err() || should_quit {
-                    break;
+                let mut interval = tokio::time::interval(Duration::from_millis(33));
+                loop {
+                    tokio::select! {
+                        _ = interval.tick() => {},
+                        res = rx.recv() => {
+                            if res.is_none() { break; }
+                        },
+                    }
+
+                    let render_result = {
+                        let mut app = app.lock().unwrap();
+                        let sz = *terminal_size.lock().unwrap();
+                        app.db_cache = shared_cache.load_full();
+
+                        app.update_state(Action::Tick).0.ok();
+
+                        let t = term.get_or_insert_with(|| {
+                            let backend = CrosstermBackend::new(output_buffer.clone());
+                            Terminal::with_options(
+                                backend,
+                                TerminalOptions {
+                                    viewport: Viewport::Fixed(Rect::new(0, 0, sz.width, sz.height)),
+                                },
+                            )
+                            .expect("Failed to create terminal")
+                        });
+
+                        let current_area = Rect::new(0, 0, sz.width, sz.height);
+                        if t.size().unwrap() != current_area.into() {
+                            t.resize(current_area).ok();
+                        }
+
+                        (Self::render_frame(&app, t, &output_buffer), app.should_quit)
+                    };
+
+                    let (buffer, should_quit) = render_result;
+                    if session_handle.data(channel, buffer.into()).await.is_err() || should_quit {
+                        break;
+                    }
                 }
+                tracing::debug!("Render loop finished");
             }
-        });
+            .instrument(span),
+        );
     }
 }
 
@@ -286,7 +301,10 @@ impl Handler for ClientHandler {
             .fingerprint(russh::keys::ssh_key::HashAlg::Sha256)
             .to_string();
 
-        println!("[v] Authenticated with fingerprint:{}", fp);
+        self.span.record("fp", &fp);
+        self.span.in_scope(|| {
+            tracing::info!("Public key authenticated");
+        });
 
         self.fingerprint = Some(fp);
 
@@ -349,7 +367,9 @@ impl Handler for ClientHandler {
         let fp = match self.fingerprint.clone() {
             Some(fp) => fp,
             None => {
-                println!("[x] Password authentication rejected.");
+                self.span.in_scope(|| {
+                    tracing::warn!("Password authentication rejected (Public key required)");
+                });
 
                 let error_header = "Error: Public key authentication is required."
                     .with(Color::Red)
@@ -466,7 +486,8 @@ impl Handler for ClientHandler {
 impl Drop for ClientHandler {
     fn drop(&mut self) {
         // DO NOT REMOVE SESSION HERE! (kick_existing_session handles this well)
+        let _enter = self.span.enter();
         let count = self.connection_count.fetch_sub(1, Ordering::Relaxed) - 1;
-        println!("[-] Connection closed. Active: {}", count);
+        tracing::info!(active_connections = count, "Connection closed");
     }
 }

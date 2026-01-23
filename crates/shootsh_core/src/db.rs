@@ -42,6 +42,7 @@ pub struct Repository {
     max_users: i64,
 }
 
+#[derive(Debug)]
 pub enum DbRequest {
     SaveGame {
         user_id: i64,

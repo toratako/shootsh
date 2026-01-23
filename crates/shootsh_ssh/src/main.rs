@@ -13,11 +13,19 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
+use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 const DEFAULT_MAX_USERS: i64 = 100_000;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    tracing_subscriber::registry()
+        .with(fmt::layer().with_ansi(true))
+        .with(EnvFilter::from_default_env().add_directive(tracing::Level::INFO.into()))
+        .init();
+
+    tracing::info!("Starting shootsh_ssh server...");
+
     let conn = Connection::open("shootsh.db").context("Failed to open DB")?;
     let repo = Repository::new(conn, DEFAULT_MAX_USERS).context("Failed to init repo")?;
     let shared_cache = Arc::new(ArcSwap::from_pointee(repo.get_current_cache()));
@@ -31,7 +39,7 @@ async fn main() -> Result<()> {
         loop {
             interval.tick().await;
             let count = count_for_log.load(Ordering::Relaxed);
-            println!("Current active connections: {}", count);
+            tracing::info!(active_connections = count, "Connection stats");
         }
     });
 
@@ -55,21 +63,21 @@ async fn main() -> Result<()> {
 
     let addr = "0.0.0.0:2222";
     let socket = TcpListener::bind(addr).await?;
-    println!("Starting shootsh_ssh on {}", addr);
+    tracing::info!(listen_addr = %addr, "SSH server listening");
 
     tokio::select! {
             res = sh.run_on_socket(config, &socket) => {
                 if let Err(e) = res {
-                    eprintln!("Server error: {:?}", e);
+                    tracing::error!(error = ?e, "Server error occurred");
                 }
             },
     _ = tokio::signal::ctrl_c() => {
-                println!("\n[!] Shutdown signal received. Cleaning up sessions...");
+                tracing::warn!("Shutdown signal received");
                 sh.cleanup_all_sessions().await;
 
                 // wait for cleanup
                 tokio::time::sleep(Duration::from_millis(500)).await;
-                println!("[!] Cleanup complete. Exiting.");
+                tracing::info!("Graceful shutdown complete");
             }
         }
 
@@ -82,13 +90,20 @@ fn spawn_db_worker(
     mut rx: mpsc::Receiver<DbRequest>,
 ) {
     std::thread::spawn(move || {
+        let span = tracing::info_span!("db_worker");
+        let _enter = span.enter();
+        tracing::info!("DB worker thread started");
+
         while let Some(req) = rx.blocking_recv() {
+            tracing::debug!(request = ?req, "Handling DB request");
             match repo.handle_request(req) {
                 Some(new_cache) => {
                     cache.store(Arc::new(new_cache));
+                    tracing::debug!("DB cache updated");
                 }
                 None => {}
             }
         }
+        tracing::info!("DB worker thread shutting down");
     });
 }
