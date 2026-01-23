@@ -4,10 +4,11 @@ use crate::server::MyServer;
 use anyhow::{Context, Result};
 use arc_swap::ArcSwap;
 use rusqlite::Connection;
-use russh::keys::ssh_key::rand_core::OsRng;
+use russh::keys::load_secret_key;
 use russh::server::Server as _;
 use shootsh_core::db::{DbCache, DbRequest, Repository};
 use std::collections::HashMap;
+use std::env;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -43,14 +44,14 @@ async fn main() -> Result<()> {
         }
     });
 
+    let key_path = env::var("SSH_HOST_KEY_PATH").context("SSH_HOST_KEY_PATH is not set")?;
+    let host_key = load_secret_key(key_path, None).context("Failed to load SSH host key")?;
+
     let config = Arc::new(russh::server::Config {
         inactivity_timeout: Some(Duration::from_secs(60 * 10)),
         auth_rejection_time: Duration::from_secs(3),
         nodelay: true,
-        keys: vec![
-            russh::keys::PrivateKey::random(&mut OsRng, russh::keys::Algorithm::Ed25519)
-                .map_err(|e| anyhow::anyhow!("Key gen failed: {}", e))?,
-        ],
+        keys: vec![host_key],
         ..Default::default()
     });
 
