@@ -53,15 +53,6 @@ impl std::io::Write for SharedBuffer {
     }
 }
 
-struct RenderContext {
-    app: Arc<Mutex<App>>,
-    terminal: Arc<Mutex<Option<Terminal<CrosstermBackend<SharedBuffer>>>>>,
-    output_buffer: SharedBuffer,
-    terminal_size: Arc<Mutex<domain::Size>>,
-    shared_cache: Arc<ArcSwap<DbCache>>,
-    session_handle: russh::server::Handle,
-}
-
 #[derive(Clone)]
 pub struct MyServer {
     pub db_tx: mpsc::Sender<DbRequest>,
@@ -86,9 +77,9 @@ impl russh::server::Server for MyServer {
                 height: 24,
             })),
             update_tx,
-            update_rx: Arc::new(Mutex::new(Some(update_rx))),
+            update_rx: Some(update_rx),
             connection_count: self.connection_count.clone(),
-            terminal: Arc::new(Mutex::new(None)),
+            terminal: None,
             output_buffer: SharedBuffer::default(),
             fingerprint: None,
             active_sessions: self.active_sessions.clone(),
@@ -103,9 +94,9 @@ pub struct ClientHandler {
     input_transformer: InputTransformer,
     terminal_size: Arc<Mutex<domain::Size>>,
     update_tx: mpsc::UnboundedSender<()>,
-    update_rx: Arc<Mutex<Option<mpsc::UnboundedReceiver<()>>>>,
+    update_rx: Option<mpsc::UnboundedReceiver<()>>,
     connection_count: Arc<AtomicUsize>,
-    terminal: Arc<Mutex<Option<Terminal<CrosstermBackend<SharedBuffer>>>>>,
+    terminal: Option<Terminal<CrosstermBackend<SharedBuffer>>>,
     output_buffer: SharedBuffer,
     pub fingerprint: Option<String>,
     pub active_sessions: Arc<Mutex<HashMap<String, russh::server::Handle>>>,
@@ -175,21 +166,19 @@ impl ClientHandler {
     }
 
     fn run_render_loop(
-        &self,
+        &mut self,
         channel: ChannelId,
         session_handle: russh::server::Handle,
         app: Arc<Mutex<App>>,
     ) {
-        let ctx = RenderContext {
-            app,
-            terminal: self.terminal.clone(),
-            output_buffer: self.output_buffer.clone(),
-            terminal_size: self.terminal_size.clone(),
-            shared_cache: self.shared_cache.clone(),
-            session_handle: session_handle.clone(),
-        };
-
-        let mut rx = self.update_rx.lock().unwrap().take();
+        let mut rx = self
+            .update_rx
+            .take()
+            .expect("Internal error: update_rx already taken");
+        let mut term = self.terminal.take();
+        let terminal_size = self.terminal_size.clone();
+        let shared_cache = self.shared_cache.clone();
+        let output_buffer = self.output_buffer.clone();
 
         tokio::spawn(async move {
             struct DropGuard {
@@ -209,7 +198,7 @@ impl ClientHandler {
             }
 
             let _guard = DropGuard {
-                handle: ctx.session_handle.clone(),
+                handle: session_handle.clone(),
                 chan: channel,
             };
 
@@ -217,23 +206,20 @@ impl ClientHandler {
             loop {
                 tokio::select! {
                     _ = interval.tick() => {},
-                    res = async {
-                        if let Some(ref mut r) = rx { r.recv().await } else { None }
-                    } => {
-                        if res.is_none() && rx.is_some() { break; }
+                    res = rx.recv() => {
+                        if res.is_none() { break; }
                     },
                 }
 
                 let render_result = {
-                    let mut app = ctx.app.lock().unwrap();
-                    let sz = *ctx.terminal_size.lock().unwrap();
-                    app.db_cache = ctx.shared_cache.load_full();
+                    let mut app = app.lock().unwrap();
+                    let sz = *terminal_size.lock().unwrap();
+                    app.db_cache = shared_cache.load_full();
 
                     app.update_state(Action::Tick).0.ok();
 
-                    let mut term_guard = ctx.terminal.lock().unwrap();
-                    let term = term_guard.get_or_insert_with(|| {
-                        let backend = CrosstermBackend::new(ctx.output_buffer.clone());
+                    let t = term.get_or_insert_with(|| {
+                        let backend = CrosstermBackend::new(output_buffer.clone());
                         Terminal::with_options(
                             backend,
                             TerminalOptions {
@@ -244,24 +230,15 @@ impl ClientHandler {
                     });
 
                     let current_area = Rect::new(0, 0, sz.width, sz.height);
-                    if term.size().unwrap() != current_area.into() {
-                        term.resize(current_area).ok();
+                    if t.size().unwrap() != current_area.into() {
+                        t.resize(current_area).ok();
                     }
 
-                    (
-                        Self::render_frame(&app, term, &ctx.output_buffer),
-                        app.should_quit,
-                    )
+                    (Self::render_frame(&app, t, &output_buffer), app.should_quit)
                 };
 
                 let (buffer, should_quit) = render_result;
-                if ctx
-                    .session_handle
-                    .data(channel, buffer.into())
-                    .await
-                    .is_err()
-                    || should_quit
-                {
+                if session_handle.data(channel, buffer.into()).await.is_err() || should_quit {
                     break;
                 }
             }

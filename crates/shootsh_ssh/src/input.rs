@@ -1,5 +1,5 @@
 use shootsh_core::Action;
-use termwiz::input::{InputEvent, InputParser, KeyCode, Modifiers, MouseButtons};
+use termwiz::input::{InputEvent, InputParser, KeyCode, MouseButtons};
 
 pub struct InputTransformer {
     parser: InputParser,
