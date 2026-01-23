@@ -54,7 +54,7 @@ async fn main() -> Result<()> {
         ..Default::default()
     });
 
-    let mut sh = MyServer {
+    let sh = MyServer {
         db_tx,
         shared_cache,
         connection_count,
@@ -65,21 +65,27 @@ async fn main() -> Result<()> {
     let socket = TcpListener::bind(addr).await?;
     tracing::info!(listen_addr = %addr, "SSH server listening");
 
-    tokio::select! {
-            res = sh.run_on_socket(config, &socket) => {
-                if let Err(e) = res {
-                    tracing::error!(error = ?e, "Server error occurred");
-                }
-            },
-    _ = tokio::signal::ctrl_c() => {
-                tracing::warn!("Shutdown signal received");
-                sh.cleanup_all_sessions().await;
+    let mut sh_clone = sh.clone();
+    let server_task = tokio::spawn(async move { sh_clone.run_on_socket(config, &socket).await });
 
-                // wait for cleanup
-                tokio::time::sleep(Duration::from_millis(500)).await;
-                tracing::info!("Graceful shutdown complete");
+    tokio::select! {
+        res = server_task => {
+            match res {
+                Ok(Ok(())) => tracing::info!("Server stopped normally"),
+                Ok(Err(e)) => tracing::error!(error = ?e, "Server error occurred"),
+                Err(e) => tracing::error!(error = ?e, "Server task panicked"),
             }
+        },
+        _ = tokio::signal::ctrl_c() => {
+            tracing::warn!("Shutdown signal received. Starting cleanup...");
+
+            sh.cleanup_all_sessions().await;
+
+            // wait for cleanup
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            tracing::info!("Graceful shutdown complete");
         }
+    }
 
     Ok(())
 }

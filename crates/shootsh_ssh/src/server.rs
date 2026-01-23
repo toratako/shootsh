@@ -1,6 +1,7 @@
 use crate::input::InputTransformer;
 use arc_swap::ArcSwap;
 use crossterm::style::{Color, Stylize};
+use futures::future::join_all;
 use ratatui::{Terminal, TerminalOptions, Viewport, backend::CrosstermBackend, layout::Rect};
 use russh::keys::ssh_key::PublicKey;
 use russh::server::{Auth, Handler, Msg, Session};
@@ -73,11 +74,23 @@ impl MyServer {
         let session_list: Vec<_> = sessions.drain().collect();
         drop(sessions);
 
-        for (fp, info) in session_list {
-            let _ = info.handle.data(info.channel_id, CLEANUP_SEQ.into()).await;
-            let _ = info.handle.close(info.channel_id).await;
-            tracing::info!(fingerprint = %fp, "Sent cleanup sequence and closed session");
-        }
+        let shutdown_msg = format!("\r\n{}\r\n", "Server is shutting down.".red().bold());
+
+        let tasks = session_list.into_iter().map(|(fp, info)| {
+            let msg = shutdown_msg.clone();
+            async move {
+                let mut payload = Vec::from(CLEANUP_SEQ);
+                payload.extend_from_slice(msg.as_bytes());
+                let _ = info.handle.data(info.channel_id, payload.into()).await;
+                let _ = info.handle.eof(info.channel_id).await;
+
+                let _ = info.handle.close(info.channel_id).await;
+
+                tracing::info!(fingerprint = %fp, "Cleanup task finished");
+            }
+        });
+
+        join_all(tasks).await;
     }
 }
 
