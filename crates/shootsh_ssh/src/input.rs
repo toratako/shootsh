@@ -35,8 +35,10 @@ impl InputTransformer {
     fn static_map_event(event: InputEvent, last_buttons: &mut MouseButtons) -> Option<Action> {
         match event {
             InputEvent::Key(k) => {
-                if k.modifiers.contains(Modifiers::CTRL) && k.key == KeyCode::Char('c') {
-                    return Some(Action::Quit);
+                match k.key {
+                    KeyCode::Char('c') => return Some(Action::Quit),
+                    KeyCode::Char('d') => return Some(Action::Quit),
+                    _ => {}
                 }
                 match k.key {
                     KeyCode::Enter => Some(Action::SubmitName),
