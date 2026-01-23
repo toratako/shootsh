@@ -21,17 +21,30 @@ pub fn render(app: &App, cache: &DbCache, f: &mut Frame) {
         return;
     }
 
+    let main_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(0),
+            Constraint::Length(1), // footer
+        ])
+        .split(area);
+
+    let main_area = main_layout[0];
+    let footer_area = main_layout[1];
+
     match &app.scene {
-        Scene::Naming(state) => render_naming(app, state, f, area),
-        Scene::Menu => render_menu(app, cache, f, area),
-        Scene::Playing(state) => render_playing(state, f, area),
+        Scene::Naming(state) => render_naming(app, state, f, main_area),
+        Scene::Menu => render_menu(app, cache, f, main_area),
+        Scene::Playing(state) => render_playing(state, f, main_area),
         Scene::GameOver {
             final_score,
             is_new_record,
-        } => render_game_over(app, cache, *final_score, *is_new_record, f, area),
-        Scene::ResetConfirmation => render_reset_confirmation(f, area),
+        } => render_game_over(app, cache, *final_score, *is_new_record, f, main_area),
+        Scene::ResetConfirmation => render_reset_confirmation(f, main_area),
     }
-    render_warning(app, f, area);
+
+    render_footer(app, f, footer_area);
+    render_warning(app, f, main_area);
     render_cursor(app, f);
 }
 
@@ -89,6 +102,38 @@ fn render_cursor(app: &App, f: &mut Frame) {
             }
         }
     }
+}
+
+fn render_footer(app: &App, f: &mut Frame, area: Rect) {
+    let style = Style::default().bg(Color::Indexed(234)).fg(Color::DarkGray);
+
+    let mut spans = match &app.scene {
+        Scene::Naming(_) => vec![" [ENTER]".yellow(), " Submit ".into()],
+        Scene::Menu => vec![" [Ctrl-K]".red().bold(), " Delete Account ".into()],
+        Scene::Playing(_) => vec![
+            " [ESC]".yellow(),
+            " Menu ".into(),
+            " [r]".yellow(),
+            " Restart ".into(),
+        ],
+        Scene::GameOver { .. } => vec![
+            " [ESC]".yellow(),
+            " Menu ".into(),
+            " [r]".yellow(),
+            " Retry ".into(),
+        ],
+        Scene::ResetConfirmation => vec![
+            " [y]".red().bold(),
+            " Confirm RESET ".into(),
+            " [n/ESC]".yellow(),
+            " Cancel ".into(),
+        ],
+    };
+
+    spans.push(" [q]".yellow());
+    spans.push(" Quit ".into());
+
+    f.render_widget(Paragraph::new(Line::from(spans)).style(style), area);
 }
 
 fn render_size_error(f: &mut Frame, area: Rect) {
