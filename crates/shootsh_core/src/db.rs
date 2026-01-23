@@ -56,7 +56,7 @@ pub enum DbRequest {
     UpdateUsername {
         user_id: i64,
         new_name: String,
-        reply_tx: tokio::sync::oneshot::Sender<Result<(), String>>,
+        reply_tx: tokio::sync::oneshot::Sender<Result<(), anyhow::Error>>,
     },
     GetOrCreateUser {
         fingerprint: String,
@@ -64,7 +64,7 @@ pub enum DbRequest {
     },
     DeleteUser {
         user_id: i64,
-        reply_tx: tokio::sync::oneshot::Sender<Result<()>>,
+        reply_tx: tokio::sync::oneshot::Sender<Result<(), anyhow::Error>>,
     },
 }
 
@@ -135,9 +135,9 @@ impl Repository {
                 }
                 Err(e) => {
                     let msg = if e.to_string().contains("UNIQUE") {
-                        "Username already taken".into()
+                        anyhow::anyhow!("Username already taken")
                     } else {
-                        "Database error".into()
+                        anyhow::anyhow!("Failed to update username")
                     };
                     let _ = reply_tx.send(Err(msg));
                     None

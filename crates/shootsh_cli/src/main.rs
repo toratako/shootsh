@@ -117,25 +117,40 @@ where
 }
 
 async fn handle_event(app: &mut App, event: Event) -> Result<()> {
+    let captured = app.input_captured();
+
     let action = match event {
         Event::Key(key) => {
             let is_ctrl = key.modifiers.contains(event::KeyModifiers::CONTROL);
-            match key.code {
-                KeyCode::Char('c') if is_ctrl => Some(Action::Quit),
-                KeyCode::Char('d') if is_ctrl => Some(Action::Quit),
-                KeyCode::Char('k') if is_ctrl => Some(Action::RequestReset),
 
-                KeyCode::Char('y') => Some(Action::ConfirmReset),
-                KeyCode::Char('n') => Some(Action::CancelReset),
-
-                KeyCode::Char('r') => Some(Action::Restart),
-                KeyCode::Char('q') => Some(Action::Quit),
-
-                KeyCode::Enter => Some(Action::SubmitName),
-                KeyCode::Backspace => Some(Action::DeleteChar),
-                KeyCode::Esc => Some(Action::BackToMenu),
-                KeyCode::Char(c) => Some(Action::InputChar(c)),
-                _ => None,
+            // global key with ctrl
+            if is_ctrl {
+                match key.code {
+                    KeyCode::Char('c') | KeyCode::Char('d') => Some(Action::Quit),
+                    KeyCode::Char('k') => Some(Action::RequestReset),
+                    _ => None,
+                }
+            } else if captured {
+                // when captured mode
+                match key.code {
+                    KeyCode::Enter => Some(Action::SubmitInput),
+                    KeyCode::Backspace => Some(Action::DeleteCharacter),
+                    KeyCode::Esc => Some(Action::BackToMenu),
+                    KeyCode::Char(c) => Some(Action::AppendCharacter(c)),
+                    _ => None,
+                }
+            } else {
+                match key.code {
+                    KeyCode::Char('q') => Some(Action::Quit),
+                    KeyCode::Char('r') => Some(Action::Restart),
+                    KeyCode::Char('y') => Some(Action::ConfirmReset),
+                    KeyCode::Char('n') => Some(Action::CancelReset),
+                    KeyCode::Enter => Some(Action::SubmitInput),
+                    KeyCode::Backspace => Some(Action::DeleteCharacter),
+                    KeyCode::Esc => Some(Action::BackToMenu),
+                    KeyCode::Char(c) => Some(Action::AppendCharacter(c)),
+                    _ => None,
+                }
             }
         }
         Event::Mouse(m) => match m.kind {
@@ -168,7 +183,7 @@ async fn handle_event(app: &mut App, event: Event) -> Result<()> {
                 },
                 Ok(Err(e)) => {
                     if let Scene::Naming(state) = &mut app.scene {
-                        state.error = Some(e);
+                        state.error = Some(e.to_string());
                         state.is_loading = false;
                     }
                 }

@@ -48,7 +48,7 @@ impl PartialEq for PlayingState {
 
 pub type ActionResult = (
     Result<()>,
-    Option<tokio::sync::oneshot::Receiver<Result<(), String>>>,
+    Option<tokio::sync::oneshot::Receiver<Result<(), anyhow::Error>>>,
 );
 
 pub struct App {
@@ -65,9 +65,9 @@ pub struct App {
 }
 
 pub enum Action {
-    InputChar(char),
-    DeleteChar,
-    SubmitName,
+    AppendCharacter(char),
+    DeleteCharacter,
+    SubmitInput,
     MouseMove(u16, u16),
     MouseClick(u16, u16),
     Quit,
@@ -105,14 +105,15 @@ impl App {
         }
     }
 
+    pub fn input_captured(&self) -> bool {
+        matches!(self.scene, Scene::Naming(_))
+    }
+
     pub fn update_state(&mut self, action: Action) -> ActionResult {
         match action {
             Action::Restart => {
-                match self.scene {
-                    Scene::Playing(_) | Scene::GameOver { .. } => {
-                        self.start_game();
-                    }
-                    _ => {}
+                if matches!(self.scene, Scene::Playing(_) | Scene::GameOver { .. }) {
+                    self.start_game();
                 }
                 (Ok(()), None)
             }
@@ -126,12 +127,7 @@ impl App {
                 }
                 (Ok(()), None)
             }
-            Action::ConfirmReset => {
-                if matches!(self.scene, Scene::ResetConfirmation) {
-                    return (Ok(()), self.handle_delete_user());
-                }
-                (Ok(()), None)
-            }
+            Action::ConfirmReset => (Ok(()), self.handle_confirm_reset()),
             Action::CancelReset => {
                 if matches!(self.scene, Scene::ResetConfirmation) {
                     self.change_scene(Scene::Menu);
@@ -144,15 +140,9 @@ impl App {
                 (Ok(()), None)
             }
             Action::MouseClick(x, y) => (self.handle_click(x, y), None),
-            Action::InputChar(c) => {
-                self.handle_input_char(c);
-                (Ok(()), None)
-            }
-            Action::DeleteChar => {
-                self.handle_delete_char();
-                (Ok(()), None)
-            }
-            Action::SubmitName => (Ok(()), self.handle_submit_name()),
+            Action::AppendCharacter(c) => (self.handle_append_char(c), None),
+            Action::DeleteCharacter => (self.handle_delete_char(), None),
+            Action::SubmitInput => (Ok(()), self.handle_submit_name()),
             Action::BackToMenu => {
                 self.change_scene(Scene::Menu);
                 (Ok(()), None)
@@ -299,25 +289,30 @@ impl App {
         Ok(())
     }
 
-    fn handle_input_char(&mut self, c: char) {
+    fn handle_append_char(&mut self, c: char) -> Result<()> {
         if let Scene::Naming(state) = &mut self.scene {
-            if !state.is_loading && state.input.chars().count() < MAX_PLAYER_NAME_LEN {
+            if !state.is_loading
+                && c.is_ascii_alphanumeric()
+                && state.input.chars().count() < MAX_PLAYER_NAME_LEN
+            {
                 state.input.push(c);
             }
         }
+        Ok(())
     }
 
-    fn handle_delete_char(&mut self) {
+    fn handle_delete_char(&mut self) -> Result<()> {
         if let Scene::Naming(state) = &mut self.scene {
             if !state.is_loading {
                 state.input.pop();
             }
         }
+        Ok(())
     }
 
     pub fn handle_submit_name(
         &mut self,
-    ) -> Option<tokio::sync::oneshot::Receiver<Result<(), String>>> {
+    ) -> Option<tokio::sync::oneshot::Receiver<Result<(), anyhow::Error>>> {
         if let Scene::Naming(state) = &mut self.scene {
             if state.is_loading {
                 return None;
@@ -342,26 +337,19 @@ impl App {
         None
     }
 
-    fn handle_delete_user(&mut self) -> Option<tokio::sync::oneshot::Receiver<Result<(), String>>> {
+    fn handle_confirm_reset(
+        &mut self,
+    ) -> Option<tokio::sync::oneshot::Receiver<Result<(), anyhow::Error>>> {
         let (tx, rx) = tokio::sync::oneshot::channel();
-        let user_id = self.user.id;
 
-        let db_tx = self.db_tx.clone();
-        tokio::spawn(async move {
-            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-            let _ = db_tx
-                .send(DbRequest::DeleteUser {
-                    user_id,
-                    reply_tx: reply_tx,
-                })
-                .await;
-
-            let result = match reply_rx.await {
-                Ok(Ok(())) => Ok(()),
-                _ => Err("Failed to delete user data".to_string()),
-            };
-            let _ = tx.send(result);
+        let send_result = self.db_tx.try_send(DbRequest::DeleteUser {
+            user_id: self.user.id,
+            reply_tx: tx,
         });
+
+        if send_result.is_err() {
+            return None;
+        }
 
         Some(rx)
     }

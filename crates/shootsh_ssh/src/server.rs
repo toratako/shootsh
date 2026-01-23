@@ -6,9 +6,8 @@ use ratatui::{Terminal, TerminalOptions, Viewport, backend::CrosstermBackend, la
 use russh::keys::ssh_key::PublicKey;
 use russh::server::{Auth, Handler, Msg, Session};
 use russh::*;
-use shootsh_core::Scene;
 use shootsh_core::db::{DbCache, DbRequest};
-use shootsh_core::{Action, App, domain, ui};
+use shootsh_core::{Action, App, Scene, domain, ui};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -446,7 +445,21 @@ impl Handler for ClientHandler {
             None => return Ok(()),
         };
 
-        let actions = self.input_transformer.handle_input(data);
+        let event_pairs = self.input_transformer.handle_input(data);
+
+        let mut actions = Vec::new();
+        {
+            let app = app_arc.lock().unwrap();
+            let captured = app.input_captured();
+
+            for (event, prev_buttons) in event_pairs {
+                if let Some(action) =
+                    crate::input::map_input_to_action(event, captured, &prev_buttons)
+                {
+                    actions.push(action);
+                }
+            }
+        }
 
         if !actions.is_empty() {
             let mut pending_workers = Vec::new();
@@ -488,7 +501,7 @@ impl Handler for ClientHandler {
                             },
                             Err(e) => {
                                 if let Scene::Naming(state) = &mut app_inner.scene {
-                                    state.error = Some(e);
+                                    state.error = Some(e.to_string());
                                     state.is_loading = false;
                                 }
                             }

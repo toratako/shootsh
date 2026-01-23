@@ -1,5 +1,5 @@
 use shootsh_core::Action;
-use termwiz::input::{InputEvent, InputParser, KeyCode, MouseButtons};
+use termwiz::input::{InputEvent, InputParser, KeyCode, Modifiers, MouseButtons};
 
 pub struct InputTransformer {
     parser: InputParser,
@@ -14,62 +14,74 @@ impl InputTransformer {
         }
     }
 
-    pub fn handle_input(&mut self, data: &[u8]) -> Vec<Action> {
-        let mut actions = Vec::new();
-        let mut last_buttons = self.last_mouse_buttons.clone();
-
+    pub fn handle_input(&mut self, data: &[u8]) -> Vec<(InputEvent, MouseButtons)> {
+        let mut results = Vec::new();
         self.parser.parse(
             data,
             |event| {
-                if let Some(action) = Self::static_map_event(event, &mut last_buttons) {
-                    actions.push(action);
+                results.push((event.clone(), self.last_mouse_buttons.clone()));
+
+                if let InputEvent::Mouse(m) = &event {
+                    self.last_mouse_buttons = m.mouse_buttons.clone();
                 }
             },
             false,
         );
-
-        self.last_mouse_buttons = last_buttons;
-        actions
+        results
     }
+}
 
-    fn static_map_event(event: InputEvent, last_buttons: &mut MouseButtons) -> Option<Action> {
-        match event {
-            InputEvent::Key(k) => {
-                let is_ctrl = k.modifiers.contains(termwiz::input::Modifiers::CTRL);
+pub fn map_input_to_action(
+    event: InputEvent,
+    captured: bool,
+    last_mouse_buttons: &MouseButtons,
+) -> Option<Action> {
+    match event {
+        InputEvent::Key(k) => {
+            let is_ctrl = k.modifiers.contains(Modifiers::CTRL);
+            if is_ctrl {
+                return match k.key {
+                    KeyCode::Char('c') | KeyCode::Char('d') => Some(Action::Quit),
+                    KeyCode::Char('k') => Some(Action::RequestReset),
+                    _ => None,
+                };
+            }
 
+            if captured {
                 match k.key {
-                    KeyCode::Char('c') if is_ctrl => Some(Action::Quit),
-                    KeyCode::Char('d') if is_ctrl => Some(Action::Quit),
-                    KeyCode::Char('k') if is_ctrl => Some(Action::RequestReset),
-
+                    KeyCode::Enter => Some(Action::SubmitInput),
+                    KeyCode::Backspace => Some(Action::DeleteCharacter),
+                    KeyCode::Escape => Some(Action::BackToMenu),
+                    KeyCode::Char(c) => Some(Action::AppendCharacter(c)),
+                    _ => None,
+                }
+            } else {
+                match k.key {
+                    KeyCode::Char('q') => Some(Action::Quit),
+                    KeyCode::Char('r') => Some(Action::Restart),
                     KeyCode::Char('y') => Some(Action::ConfirmReset),
                     KeyCode::Char('n') => Some(Action::CancelReset),
-
-                    KeyCode::Char('r') => Some(Action::Restart),
-                    KeyCode::Char('q') => Some(Action::Quit),
-
-                    KeyCode::Enter => Some(Action::SubmitName),
-                    KeyCode::Backspace => Some(Action::DeleteChar),
+                    KeyCode::Enter => Some(Action::SubmitInput),
+                    KeyCode::Backspace => Some(Action::DeleteCharacter),
                     KeyCode::Escape => Some(Action::BackToMenu),
-                    KeyCode::Char(c) => Some(Action::InputChar(c)),
+                    KeyCode::Char(c) => Some(Action::AppendCharacter(c)),
                     _ => None,
                 }
             }
-            InputEvent::Mouse(m) => {
-                let x = m.x.saturating_sub(1);
-                let y = m.y.saturating_sub(1);
+        }
+        InputEvent::Mouse(m) => {
+            // 1-index to 0-index
+            let x = m.x.saturating_sub(1);
+            let y = m.y.saturating_sub(1);
+            let was_pressed = last_mouse_buttons.contains(MouseButtons::LEFT);
+            let is_pressed = m.mouse_buttons.contains(MouseButtons::LEFT);
 
-                let was_pressed = last_buttons.contains(MouseButtons::LEFT);
-                let is_pressed = m.mouse_buttons.contains(MouseButtons::LEFT);
-
-                *last_buttons = m.mouse_buttons;
-
-                if is_pressed && !was_pressed {
-                    return Some(Action::MouseClick(x, y));
-                }
+            if is_pressed && !was_pressed {
+                Some(Action::MouseClick(x, y))
+            } else {
                 Some(Action::MouseMove(x, y))
             }
-            _ => None,
         }
+        _ => None,
     }
 }
