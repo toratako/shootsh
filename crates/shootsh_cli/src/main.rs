@@ -119,18 +119,24 @@ where
 async fn handle_event(app: &mut App, event: Event) -> Result<()> {
     let action = match event {
         Event::Key(key) => {
-            if key.modifiers.contains(event::KeyModifiers::CONTROL)
-                && key.code == KeyCode::Char('c')
-            {
-                Some(Action::Quit)
-            } else {
-                match key.code {
-                    KeyCode::Enter => Some(Action::SubmitName),
-                    KeyCode::Char(c) => Some(Action::InputChar(c)),
-                    KeyCode::Backspace => Some(Action::DeleteChar),
-                    KeyCode::Esc => Some(Action::BackToMenu),
-                    _ => None,
+            let is_ctrl = key.modifiers.contains(event::KeyModifiers::CONTROL);
+            match key.code {
+                KeyCode::Char('c') if is_ctrl => Some(Action::Quit),
+                KeyCode::Char('d') if is_ctrl => Some(Action::Quit),
+                KeyCode::Char('k') if is_ctrl => Some(Action::RequestReset),
+
+                KeyCode::Char('y') if matches!(app.scene, Scene::ResetConfirmation) => {
+                    Some(Action::ConfirmReset)
                 }
+                KeyCode::Char('n') if matches!(app.scene, Scene::ResetConfirmation) => {
+                    Some(Action::CancelReset)
+                }
+
+                KeyCode::Enter => Some(Action::SubmitName),
+                KeyCode::Char(c) => Some(Action::InputChar(c)),
+                KeyCode::Backspace => Some(Action::DeleteChar),
+                KeyCode::Esc => Some(Action::BackToMenu),
+                _ => None,
             }
         }
         Event::Mouse(m) => match m.kind {
@@ -144,18 +150,23 @@ async fn handle_event(app: &mut App, event: Event) -> Result<()> {
     };
 
     if let Some(act) = action {
+        let current_scene = app.scene.clone();
         let (res, rx) = app.update_state(act);
         res.context("Failed to update state")?;
 
         if let Some(rx) = rx {
             // for a CLI ver, this is not a matter
             match rx.await {
-                Ok(Ok(_)) => {
-                    if let Scene::Naming(state) = &app.scene {
+                Ok(Ok(_)) => match current_scene {
+                    Scene::Naming(state) => {
                         app.user.name = Some(state.input.clone());
+                        app.change_scene(Scene::Menu);
                     }
-                    app.change_scene(Scene::Menu);
-                }
+                    Scene::ResetConfirmation => {
+                        app.should_quit = true;
+                    }
+                    _ => app.change_scene(Scene::Menu),
+                },
                 Ok(Err(e)) => {
                     if let Scene::Naming(state) = &mut app.scene {
                         state.error = Some(e);
