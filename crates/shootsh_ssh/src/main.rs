@@ -63,9 +63,9 @@ async fn main() -> Result<()> {
         active_sessions: Arc::new(std::sync::Mutex::new(HashMap::new())),
     };
 
-    let addr = "0.0.0.0:2222";
-    let socket = TcpListener::bind(addr).await?;
+    let addr = env::var("LISTEN_ADDR").unwrap_or_else(|_| "0.0.0.0:2222".to_string());
     tracing::info!(listen_addr = %addr, "SSH server listening");
+    let socket = TcpListener::bind(addr).await?;
 
     let mut sh_clone = sh.clone();
     let server_task = tokio::spawn(async move { sh_clone.run_on_socket(config, &socket).await });
