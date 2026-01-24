@@ -1,8 +1,8 @@
+use crate::anticheat::BehaviorAnalyzer;
 use crate::db::{DbCache, DbRequest, UserContext};
 use crate::domain::{
     CombatStats, MAX_PLAYER_NAME_LEN, MouseTrace, PLAYING_TIME_SEC, Point, Size, Target,
 };
-use crate::validator::InteractionValidator;
 use anyhow::Result;
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -91,7 +91,7 @@ pub struct App {
     pub screen_size: Size,
     pub last_scene_change: Instant,
     pub should_quit: bool,
-    validator: InteractionValidator,
+    behavior_analyzer: BehaviorAnalyzer,
     pub last_cheat_warning: Option<Instant>,
     pub leaderboard_tab: LeaderboardTab,
 }
@@ -133,7 +133,7 @@ impl App {
             screen_size: Size::default(),
             last_scene_change: Instant::now(),
             should_quit: false,
-            validator: InteractionValidator::new(Default::default()),
+            behavior_analyzer: BehaviorAnalyzer::new(Default::default()),
             last_cheat_warning: None,
             db_tx,
             leaderboard_tab: LeaderboardTab::default(),
@@ -304,7 +304,7 @@ impl App {
                     return Ok(());
                 }
 
-                let is_legit = self.validator.is_legit_interaction(
+                let is_legit = self.behavior_analyzer.is_legit_interaction(
                     &state.mouse_history,
                     state.last_target_spawn,
                     Point { x, y },
