@@ -166,18 +166,3 @@ impl Target {
         elapsed >= stats.get_target_lifetime()
     }
 }
-
-pub fn format_player_name(name: &str) -> String {
-    let cleaned = name
-        .trim()
-        .chars()
-        .filter(|c| !c.is_control())
-        .take(MAX_PLAYER_NAME_LEN)
-        .collect::<String>();
-
-    if cleaned.is_empty() {
-        "Anonymous".to_string()
-    } else {
-        cleaned
-    }
-}
