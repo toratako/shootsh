@@ -18,6 +18,7 @@ ReadWritePaths=/var/www/shootsh
 NoNewPrivileges=yes
 PrivateTmp=yes
 PrivateDevices=yes
+PrivateNetwork=yes
 ProtectSystem=strict
 ProtectHome=yes
 
