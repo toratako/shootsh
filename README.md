@@ -20,4 +20,14 @@ See [deploy/](./deploy) (sample).
 
 ## License
 
-[The Unlicense](LICENSE)
+This project is licensed under [The Unlicense](LICENSE).  
+
+### Third-Party Licenses
+
+This project depends on several open-source libraries.  
+For a complete list of their licenses, please see [THIRD-PARTY-LICENSES.html](THIRD-PARTY-LICENSES.html).  
+
+```shell
+# To (re)generate the third-party license list:
+cargo about generate about.hbs > THIRD-PARTY-LICENSES.html
+```
