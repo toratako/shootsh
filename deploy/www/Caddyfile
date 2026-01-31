@@ -1,0 +1,29 @@
+{
+    admin "unix//run/caddy/admin.socket" 
+}
+
+shoot.sh {
+    root * /var/www/shootsh
+    file_server
+    encode zstd gzip
+    header {
+        -Server
+        Cache-Control "max-age=60"
+        Clear-Site-Data: "*"
+        Content-Security-Policy "default-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; upgrade-insecure-requests;"
+        Cross-Origin-Embedder-Policy require-corp
+        Cross-Origin-Opener-Policy same-origin
+        Cross-Origin-Resource-Policy same-origin
+        Origin-Agent-Cluster ?1
+        Permissions-Policy "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+        Referrer-Policy no-referrer
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        Vary: Sec-Fetch-Dest, Sec-Fetch-Mode, Sec-Fetch-Site, Sec-Fetch-User
+        X-Content-Type-Options nosniff
+        X-DNS-Prefetch-Control: off
+        X-Frame-Options DENY
+        X-XSS-Protection 0
+    }
+}
+
+import /etc/caddy/conf.d/*
