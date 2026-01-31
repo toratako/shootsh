@@ -8,7 +8,7 @@ DB_FILE="/var/lib/shootsh/shootsh.db"
 TEMPLATE_FILE="/var/www/shootsh/index_template.html"
 OUTPUT_FILE="/var/www/shootsh/index.html"
 
-CURRENT_DATE=$(date '+%Y-%m-%d')
+CURRENT_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 WORK_TMP=$(mktemp)
 trap 'rm -f "$WORK_TMP"' EXIT
 
