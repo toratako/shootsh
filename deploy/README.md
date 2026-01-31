@@ -27,7 +27,7 @@ sudo chmod 700 /etc/shootsh /var/lib/shootsh
 sudo chmod 600 /etc/shootsh/env /etc/shootsh/ssh_host_ed25519_key
 
 # systemd
-sudo cp deploy/systemd/shootsh.service /etc/systemd/system/
+sudo cp systemd/shootsh.service /etc/systemd/system/
 sudo chmod 644 /etc/systemd/system/shootsh.service
 
 # start
