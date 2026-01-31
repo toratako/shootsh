@@ -2,6 +2,7 @@
 name = "shootsh_ssh"
 version = "0.1.0"
 edition = "2024"
+license = "Unlicense"
 
 [dependencies]
 shootsh_core = { path = "../shootsh_core" }
